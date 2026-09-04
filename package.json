@@ -1,0 +1,84 @@
+{
+  "name": "oneshare",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A private cross-platform inbox for sharing text and files between your devices.",
+  "author": "Matyas",
+  "desktopName": "com.oneshare.app",
+  "type": "module",
+  "main": "dist-electron/main.cjs",
+  "productName": "OneShare",
+  "scripts": {
+    "dev": "vite",
+    "dev:web": "vite",
+    "dev:desktop": "node electron/dev.mjs",
+    "build:web": "vite build",
+    "build:electron": "node electron/build.mjs",
+    "build": "bun run build:web && bun run build:electron",
+    "preview": "vite preview",
+    "start:desktop": "electron .",
+    "typecheck": "tsc --noEmit",
+    "lint": "prettier --check \"**/*.{ts,tsx,mjs,json,html,css}\"",
+    "cap:add:android": "cap add android",
+    "cap:sync": "bun run build:web && cap sync",
+    "cap:open:android": "cap open android",
+    "cap:run:android": "cap run android",
+    "dist": "bun run build && electron-builder"
+  },
+  "dependencies": {
+    "@auth/core": "0.41.1",
+    "@capacitor/core": "^8.5.1",
+    "@convex-dev/auth": "^0.0.95",
+    "@fontsource/dm-mono": "^5.3.0",
+    "@fontsource/manrope": "^5.3.0",
+    "convex": "^1.45.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@capacitor/android": "^8.5.1",
+    "@capacitor/cli": "^8.5.1",
+    "@types/node": "^26.4.1",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.5",
+    "@vitejs/plugin-react": "^6.1.1",
+    "electron": "^44.1.1",
+    "electron-builder": "^26.15.3",
+    "esbuild": "^0.27.0",
+    "prettier": "^3.9.6",
+    "typescript": "^7.0.2",
+    "vite": "^8.2.2"
+  },
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "build": {
+    "appId": "com.oneshare.app",
+    "productName": "OneShare",
+    "artifactName": "OneShare-${version}-${os}-${arch}.${ext}",
+    "asar": true,
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "output": "release",
+      "buildResources": "public"
+    },
+    "mac": {
+      "category": "public.app-category.utilities",
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "linux": {
+      "category": "Utility",
+      "target": [
+        "AppImage",
+        "deb"
+      ]
+    }
+  }
+}

@@ -1,0 +1,9 @@
+node_modules
+dist
+dist-electron
+release
+android/app/src/main/assets
+android/.gradle
+android/app/build
+android/**/build
+convex/_generated

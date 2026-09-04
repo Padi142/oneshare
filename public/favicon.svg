@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title>OneShare</title>
+  <path d="M4 4h56v39L43 60H4z" fill="#20241f" />
+  <path d="M43 43h17L43 60z" fill="#e45c36" />
+  <circle cx="24" cy="29" r="9" fill="none" stroke="#f3f0e8" stroke-width="5" />
+  <path d="M34 36h8c0 5-3 8-8 8-4 0-7-2-8-5" fill="none" stroke="#e45c36" stroke-width="5" />
+</svg>
