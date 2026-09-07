@@ -13,10 +13,15 @@ export function OneShareApp() {
   const scrollerRef = useRef<HTMLDivElement>(null);
   const hasInitialScroll = useRef(false);
   const previousMessageCount = useRef(0);
+  const shouldStickToBottom = useRef(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [showJumpButton, setShowJumpButton] = useState(false);
   const [newMessageCount, setNewMessageCount] = useState(0);
-  const [deleteTarget, setDeleteTarget] = useState<LocalMessage>();
+  const [isSelectionMode, setIsSelectionMode] = useState(false);
+  const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [deleteTargets, setDeleteTargets] = useState<LocalMessage[]>([]);
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string>();
 
@@ -43,50 +48,106 @@ export function OneShareApp() {
   const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
     const scroller = scrollerRef.current;
     if (!scroller) return;
+    shouldStickToBottom.current = true;
     scroller.scrollTo({ top: scroller.scrollHeight, behavior });
     setShowJumpButton(false);
     setNewMessageCount(0);
   }, []);
 
   useEffect(() => {
-    if (chat.messages.length === 0) return;
+    if (chat.isLoading || chat.messages.length === 0) return;
+    const messageCount = chat.messages.length;
+    let frameId: number | undefined;
+
     if (!hasInitialScroll.current) {
       hasInitialScroll.current = true;
-      requestAnimationFrame(() => scrollToBottom("auto"));
-      previousMessageCount.current = chat.messages.length;
-      return;
-    }
-    if (chat.messages.length > previousMessageCount.current) {
-      if (isAtBottom()) requestAnimationFrame(() => scrollToBottom("smooth"));
-      else {
+      previousMessageCount.current = messageCount;
+      frameId = requestAnimationFrame(() => scrollToBottom("auto"));
+    } else if (messageCount > previousMessageCount.current) {
+      if (isAtBottom()) {
+        frameId = requestAnimationFrame(() => scrollToBottom("smooth"));
+      } else {
         setShowJumpButton(true);
         setNewMessageCount(
-          (count) =>
-            count + (chat.messages.length - previousMessageCount.current),
+          (count) => count + (messageCount - previousMessageCount.current),
         );
       }
     }
-    previousMessageCount.current = chat.messages.length;
-  }, [chat.messages.length, isAtBottom, scrollToBottom]);
+    previousMessageCount.current = messageCount;
+
+    const messageColumn =
+      scrollerRef.current?.querySelector<HTMLElement>(".message-column");
+    const resizeObserver =
+      messageColumn && typeof ResizeObserver !== "undefined"
+        ? new ResizeObserver(() => {
+            if (shouldStickToBottom.current) scrollToBottom("auto");
+          })
+        : undefined;
+    if (resizeObserver && messageColumn) resizeObserver.observe(messageColumn);
+
+    return () => {
+      if (frameId !== undefined) cancelAnimationFrame(frameId);
+      resizeObserver?.disconnect();
+    };
+  }, [chat.isLoading, chat.messages.length, isAtBottom, scrollToBottom]);
 
   function handleScroll() {
     const scroller = scrollerRef.current;
     if (!scroller) return;
     if (scroller.scrollTop < 96 && chat.paginationStatus === "CanLoadMore")
       chat.loadMore(32);
-    if (isAtBottom()) {
+    const atBottom = isAtBottom();
+    shouldStickToBottom.current = atBottom;
+    if (atBottom) {
       setShowJumpButton(false);
       setNewMessageCount(0);
     }
   }
 
+  const startSelection = useCallback((messageId?: string) => {
+    setIsSelectionMode(true);
+    if (!messageId) return;
+    setSelectedMessageIds((current) => {
+      if (current.has(messageId)) return current;
+      return new Set(current).add(messageId);
+    });
+  }, []);
+
+  const toggleSelect = useCallback((messageId: string) => {
+    setSelectedMessageIds((current) => {
+      const next = new Set(current);
+      if (next.has(messageId)) next.delete(messageId);
+      else next.add(messageId);
+      return next;
+    });
+  }, []);
+
+  const cancelSelection = useCallback(() => {
+    setIsSelectionMode(false);
+    setSelectedMessageIds(new Set());
+  }, []);
+
+  const requestDelete = useCallback((message: LocalMessage) => {
+    setDeleteTargets([message]);
+  }, []);
+
+  const requestDeleteSelected = useCallback(() => {
+    const targets = chat.messages.filter((message) =>
+      selectedMessageIds.has(message._id),
+    );
+    if (targets.length > 0) setDeleteTargets(targets);
+  }, [chat.messages, selectedMessageIds]);
+
   async function confirmDelete() {
-    if (!deleteTarget) return;
+    if (deleteTargets.length === 0) return;
     setIsDeleting(true);
     setDeleteError(undefined);
     try {
-      await chat.deleteMessage(deleteTarget._id);
-      setDeleteTarget(undefined);
+      await Promise.all(
+        deleteTargets.map((message) => chat.deleteMessage(message._id)),
+      );
+      setDeleteTargets([]);
+      cancelSelection();
     } catch (error) {
       setDeleteError(
         error instanceof Error
@@ -101,26 +162,29 @@ export function OneShareApp() {
   return (
     <div className="app-shell">
       <ChatHeader
+        isSelectionMode={isSelectionMode}
+        selectedMessageCount={selectedMessageIds.size}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
+        onStartSelection={() => startSelection()}
+        onCancelSelection={cancelSelection}
+        onDeleteSelected={requestDeleteSelected}
         onSignOut={signOut}
       />
       <main className="chat-main">
-        <div className="chat-context" aria-hidden="true">
-          <span>
-            <i className="status-dot" /> Live relay
-          </span>
-          <span>Everything here belongs to you</span>
-        </div>
         <MessageList
           messages={chat.messages}
           isLoading={chat.isLoading}
+          isSelectionMode={isSelectionMode}
+          selectedMessageIds={selectedMessageIds}
           searchQuery={searchQuery}
           paginationStatus={chat.paginationStatus}
           onLoadMore={() => chat.loadMore(32)}
           onScroll={handleScroll}
           scrollerRef={scrollerRef}
-          onRequestDelete={setDeleteTarget}
+          onStartSelection={startSelection}
+          onToggleSelect={toggleSelect}
+          onRequestDelete={requestDelete}
         />
         {showJumpButton ? (
           <button
@@ -140,12 +204,12 @@ export function OneShareApp() {
           onUploadFile={chat.uploadFile}
         />
       </main>
-      {deleteTarget ? (
+      {deleteTargets.length > 0 ? (
         <DeleteDialog
-          message={deleteTarget}
+          messages={deleteTargets}
           isDeleting={isDeleting}
           onCancel={() => {
-            if (!isDeleting) setDeleteTarget(undefined);
+            if (!isDeleting) setDeleteTargets([]);
           }}
           onConfirm={confirmDelete}
         />

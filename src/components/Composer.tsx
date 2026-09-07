@@ -91,6 +91,15 @@ function uploadError(error: unknown): string {
     : "Upload failed. Try again.";
 }
 
+function looksLikeDesktopFilePath(value: string): boolean {
+  const path = value.trim();
+  return (
+    path.startsWith("/") ||
+    path.startsWith("file://") ||
+    /^[a-z]:[\\/]/i.test(path)
+  );
+}
+
 export function Composer({ onSendMessage, onUploadFile }: ComposerProps) {
   const [text, setText] = useState("");
   const [staged, setStaged] = useState<StagedAttachment[]>([]);
@@ -117,29 +126,33 @@ export function Composer({ onSendMessage, onUploadFile }: ComposerProps) {
     [],
   );
 
-  const addFiles = useCallback((incoming: FileList | File[]) => {
-    const candidates = Array.from(incoming);
-    const tooLarge = candidates
-      .map(fileError)
-      .find((message) => message !== undefined);
-    if (tooLarge) setError(tooLarge);
-    const accepted = filesFromList(candidates);
-    if (accepted.length === 0) return;
-    const next = accepted.map((file): StagedAttachment => {
-      const previewUrl = URL.createObjectURL(file);
-      previewUrlsRef.current.add(previewUrl);
-      return {
-        id: `${file.name}-${file.lastModified}-${Math.random().toString(36).slice(2)}`,
-        file,
-        previewUrl,
-        kind: kindForFile(file),
-        state: "ready",
-        progress: 0,
-      };
-    });
-    setStaged((current) => [...current, ...next]);
-    setError(undefined);
-  }, []);
+  const addFiles = useCallback(
+    (incoming: FileList | File[]): StagedAttachment[] => {
+      const candidates = Array.from(incoming);
+      const tooLarge = candidates
+        .map(fileError)
+        .find((message) => message !== undefined);
+      if (tooLarge) setError(tooLarge);
+      const accepted = filesFromList(candidates);
+      if (accepted.length === 0) return [];
+      const next = accepted.map((file): StagedAttachment => {
+        const previewUrl = URL.createObjectURL(file);
+        previewUrlsRef.current.add(previewUrl);
+        return {
+          id: `${file.name}-${file.lastModified}-${Math.random().toString(36).slice(2)}`,
+          file,
+          previewUrl,
+          kind: kindForFile(file),
+          state: "ready",
+          progress: 0,
+        };
+      });
+      setStaged((current) => [...current, ...next]);
+      setError(undefined);
+      return next;
+    },
+    [],
+  );
 
   function removeFile(id: string) {
     setStaged((current) => {
@@ -246,49 +259,111 @@ export function Composer({ onSendMessage, onUploadFile }: ComposerProps) {
     }
   }
 
-  function handlePaste(event: React.ClipboardEvent<HTMLTextAreaElement>) {
-    const files = Array.from(event.clipboardData.files);
-    if (files.length === 0) return;
-    event.preventDefault();
-    addFiles(files);
-  }
+  async function attachPastedDesktopFile(path: string) {
+    if (!window.desktopBridge) return;
 
-  function handleDragEnter(event: React.DragEvent<HTMLDivElement>) {
-    event.preventDefault();
-    dragDepth.current += 1;
-    if (event.dataTransfer.types.includes("Files")) setIsDragging(true);
-  }
-
-  function handleDragLeave(event: React.DragEvent<HTMLDivElement>) {
-    event.preventDefault();
-    dragDepth.current -= 1;
-    if (dragDepth.current <= 0) {
-      dragDepth.current = 0;
-      setIsDragging(false);
+    setIsSending(true);
+    try {
+      const desktopFile = await window.desktopBridge.readFileFromPath(path);
+      const file = new File([desktopFile.contents], desktopFile.name, {
+        type: desktopFile.mimeType,
+        lastModified: desktopFile.lastModified,
+      });
+      const [item] = addFiles([file]);
+      if (!item) return;
+      const attachment = await uploadOne(item);
+      await onSendMessage("", [attachment]);
+      removeFile(item.id);
+    } catch (caught) {
+      setError(uploadError(caught));
+    } finally {
+      setIsSending(false);
+      textareaRef.current?.focus();
     }
   }
 
-  function handleDrop(event: React.DragEvent<HTMLDivElement>) {
+  function handlePaste(event: React.ClipboardEvent<HTMLTextAreaElement>) {
+    const files = Array.from(event.clipboardData.files);
+    if (files.length > 0) {
+      event.preventDefault();
+      addFiles(files);
+      return;
+    }
+
+    const pastedText = event.clipboardData.getData("text/plain");
+    if (!window.desktopBridge || !looksLikeDesktopFilePath(pastedText)) return;
+
     event.preventDefault();
-    dragDepth.current = 0;
-    setIsDragging(false);
-    if (event.dataTransfer.files.length > 0) addFiles(event.dataTransfer.files);
+    void attachPastedDesktopFile(pastedText);
   }
+
+  useEffect(() => {
+    function isFileDrag(event: DragEvent): boolean {
+      return event.dataTransfer?.types.includes("Files") ?? false;
+    }
+
+    function handleDragEnter(event: DragEvent) {
+      if (!isFileDrag(event)) return;
+      event.preventDefault();
+      dragDepth.current += 1;
+      setIsDragging(true);
+    }
+
+    function handleDragOver(event: DragEvent) {
+      if (!isFileDrag(event)) return;
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+      setIsDragging(true);
+    }
+
+    function handleDragLeave(event: DragEvent) {
+      if (!isFileDrag(event)) return;
+      event.preventDefault();
+      dragDepth.current -= 1;
+      if (dragDepth.current <= 0) {
+        dragDepth.current = 0;
+        setIsDragging(false);
+      }
+    }
+
+    function handleDrop(event: DragEvent) {
+      if (!isFileDrag(event)) return;
+      event.preventDefault();
+      dragDepth.current = 0;
+      setIsDragging(false);
+      const files = event.dataTransfer?.files;
+      if (files && files.length > 0) addFiles(files);
+    }
+
+    function resetDrag() {
+      dragDepth.current = 0;
+      setIsDragging(false);
+    }
+
+    document.addEventListener("dragenter", handleDragEnter);
+    document.addEventListener("dragover", handleDragOver);
+    document.addEventListener("dragleave", handleDragLeave);
+    document.addEventListener("drop", handleDrop);
+    document.addEventListener("dragend", resetDrag);
+    window.addEventListener("blur", resetDrag);
+    return () => {
+      document.removeEventListener("dragenter", handleDragEnter);
+      document.removeEventListener("dragover", handleDragOver);
+      document.removeEventListener("dragleave", handleDragLeave);
+      document.removeEventListener("drop", handleDrop);
+      document.removeEventListener("dragend", resetDrag);
+      window.removeEventListener("blur", resetDrag);
+    };
+  }, [addFiles]);
 
   const canSend = !isSending && Boolean(text.trim() || staged.length);
 
   return (
-    <div
-      className={`composer-wrap ${isDragging ? "composer-wrap--dragging" : ""}`}
-      onDragEnter={handleDragEnter}
-      onDragLeave={handleDragLeave}
-      onDragOver={(event) => event.preventDefault()}
-      onDrop={handleDrop}
-    >
+    <div className="composer-wrap">
       {isDragging ? (
-        <div className="drop-overlay" role="status">
+        <div className="drop-overlay" role="status" aria-live="polite">
           <PaperclipIcon size={21} />
-          <span>Drop to add to relay</span>
+          <span>Drop anywhere to attach</span>
         </div>
       ) : null}
       {staged.length > 0 ? (

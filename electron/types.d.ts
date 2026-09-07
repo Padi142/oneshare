@@ -11,11 +11,19 @@ export type DesktopPlatform =
 
 export type DesktopMenuAction = "new-message" | "focus-search";
 
+export interface DesktopFile {
+  name: string;
+  mimeType: string;
+  lastModified: number;
+  contents: ArrayBuffer;
+}
+
 export interface DesktopBridge {
   readonly isElectron: true;
   readonly platform: DesktopPlatform;
   getAppVersion(): Promise<string>;
   openExternal(url: string): Promise<boolean>;
+  readFileFromPath(path: string): Promise<DesktopFile>;
   onMenuAction(listener: (action: DesktopMenuAction) => void): () => void;
 }
 

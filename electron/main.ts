@@ -1,16 +1,19 @@
 import { app, BrowserWindow, ipcMain, Menu, shell } from "electron";
 import type { MenuItemConstructorOptions, Rectangle } from "electron";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { readFile, stat } from "node:fs/promises";
+import { basename, extname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import type { DesktopMenuAction } from "./types";
+import type { DesktopFile, DesktopMenuAction } from "./types";
 
 const APP_VERSION_CHANNEL = "app:get-version";
 const OPEN_EXTERNAL_CHANNEL = "shell:open-external";
+const READ_FILE_FROM_PATH_CHANNEL = "file:read-from-path";
 const MENU_ACTION_CHANNEL = "menu:action";
 
 const APP_NAME = "OneShare";
+const MAX_UPLOAD_BYTES = 500 * 1024 * 1024;
 const DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL?.trim();
 const MIN_WINDOW_WIDTH = 720;
 const MIN_WINDOW_HEIGHT = 520;
@@ -30,6 +33,26 @@ type PersistedWindowState = {
 };
 
 let mainWindow: BrowserWindow | null = null;
+
+const MIME_TYPES: Readonly<Record<string, string>> = {
+  ".avif": "image/avif",
+  ".bmp": "image/bmp",
+  ".gif": "image/gif",
+  ".heic": "image/heic",
+  ".heif": "image/heif",
+  ".jpeg": "image/jpeg",
+  ".jpg": "image/jpeg",
+  ".m4v": "video/x-m4v",
+  ".mkv": "video/x-matroska",
+  ".mov": "video/quicktime",
+  ".mp4": "video/mp4",
+  ".mpeg": "video/mpeg",
+  ".mpg": "video/mpeg",
+  ".png": "image/png",
+  ".svg": "image/svg+xml",
+  ".webm": "video/webm",
+  ".webp": "image/webp",
+};
 
 function stateFilePath(): string {
   return join(app.getPath("userData"), "window-state.json");
@@ -121,6 +144,77 @@ async function openExternalUrl(value: unknown): Promise<boolean> {
 
   await shell.openExternal(value);
   return true;
+}
+
+function pathFromPaste(value: unknown): string {
+  if (typeof value !== "string") {
+    throw new Error("Paste an absolute path to a file.");
+  }
+
+  const trimmed = value.trim();
+  const unquoted =
+    trimmed.length >= 2 &&
+    ((trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+      (trimmed.startsWith("'") && trimmed.endsWith("'")))
+      ? trimmed.slice(1, -1)
+      : trimmed;
+
+  if (!unquoted || unquoted.includes("\n")) {
+    throw new Error("Paste one absolute path to a file.");
+  }
+
+  let filePath = unquoted;
+  if (filePath.startsWith("file://")) {
+    try {
+      filePath = fileURLToPath(filePath);
+    } catch {
+      throw new Error("That file URL isn't valid.");
+    }
+  }
+
+  if (!isAbsolute(filePath)) {
+    throw new Error("Paste an absolute path to a file.");
+  }
+
+  return filePath;
+}
+
+function mimeTypeForPath(filePath: string): string {
+  return (
+    MIME_TYPES[extname(filePath).toLowerCase()] ?? "application/octet-stream"
+  );
+}
+
+async function readFileFromPath(value: unknown): Promise<DesktopFile> {
+  const filePath = pathFromPaste(value);
+
+  let fileStats: Awaited<ReturnType<typeof stat>>;
+  try {
+    fileStats = await stat(filePath);
+  } catch {
+    throw new Error("Couldn't find a file at that path.");
+  }
+
+  if (!fileStats.isFile()) {
+    throw new Error("Paste the path to a file, not a folder.");
+  }
+  if (fileStats.size > MAX_UPLOAD_BYTES) {
+    throw new Error("That file is larger than 500 MB.");
+  }
+
+  try {
+    const contents = await readFile(filePath);
+    const copy = new Uint8Array(contents.byteLength);
+    copy.set(contents);
+    return {
+      name: basename(filePath),
+      mimeType: mimeTypeForPath(filePath),
+      lastModified: Math.round(fileStats.mtimeMs),
+      contents: copy.buffer,
+    };
+  } catch {
+    throw new Error("Couldn't read that file.");
+  }
 }
 
 function isRendererUrl(url: string): boolean {
@@ -224,6 +318,9 @@ function registerIpcHandlers(): void {
   ipcMain.handle(APP_VERSION_CHANNEL, () => app.getVersion());
   ipcMain.handle(OPEN_EXTERNAL_CHANNEL, (_event, value: unknown) =>
     openExternalUrl(value),
+  );
+  ipcMain.handle(READ_FILE_FROM_PATH_CHANNEL, (_event, value: unknown) =>
+    readFileFromPath(value),
   );
 }
 

@@ -6,12 +6,16 @@ import type { LocalMessage } from "../hooks/useChat";
 interface MessageListProps {
   messages: LocalMessage[];
   isLoading: boolean;
+  isSelectionMode: boolean;
+  selectedMessageIds: ReadonlySet<string>;
   searchQuery: string;
   paginationStatus:
     "LoadingFirstPage" | "CanLoadMore" | "LoadingMore" | "Exhausted";
   onLoadMore: () => void;
   onScroll: (event: UIEvent<HTMLDivElement>) => void;
   scrollerRef: RefObject<HTMLDivElement | null>;
+  onStartSelection: (messageId: string) => void;
+  onToggleSelect: (messageId: string) => void;
   onRequestDelete: (message: LocalMessage) => void;
 }
 
@@ -45,11 +49,15 @@ function EmptyMessages({ hasSearch }: { hasSearch: boolean }) {
 export function MessageList({
   messages,
   isLoading,
+  isSelectionMode,
+  selectedMessageIds,
   searchQuery,
   paginationStatus,
   onLoadMore,
   onScroll,
   scrollerRef,
+  onStartSelection,
+  onToggleSelect,
   onRequestDelete,
 }: MessageListProps) {
   const filtered = messages.filter((message) =>
@@ -98,6 +106,10 @@ export function MessageList({
               ) : null}
               <MessageBubble
                 message={message}
+                isSelectionMode={isSelectionMode}
+                isSelected={selectedMessageIds.has(message._id)}
+                onStartSelection={onStartSelection}
+                onToggleSelect={onToggleSelect}
                 onRequestDelete={onRequestDelete}
               />
             </div>

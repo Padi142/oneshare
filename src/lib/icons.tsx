@@ -158,6 +158,15 @@ export function SearchIcon(props: IconProps) {
   );
 }
 
+export function SelectIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <rect x="4" y="4" width="16" height="16" rx="3" />
+      <path d="m8 12 2.5 2.5L16 9" />
+    </Icon>
+  );
+}
+
 export function SendIcon(props: IconProps) {
   return (
     <Icon {...props}>
