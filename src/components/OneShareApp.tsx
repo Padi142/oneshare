@@ -1,11 +1,12 @@
 import { useAuthActions } from "@convex-dev/auth/react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChatHeader } from "./ChatHeader";
 import { Composer } from "./Composer";
 import { DeleteDialog } from "./DeleteDialog";
 import { MessageList } from "./MessageList";
 import { ArrowDownIcon } from "../lib/icons";
 import { useChat, type LocalMessage } from "../hooks/useChat";
+import { downloadFiles, type DownloadFile } from "../lib/download";
 
 export function OneShareApp() {
   const { signOut } = useAuthActions();
@@ -24,6 +25,29 @@ export function OneShareApp() {
   const [deleteTargets, setDeleteTargets] = useState<LocalMessage[]>([]);
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string>();
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [downloadNotice, setDownloadNotice] = useState<string>();
+  const [downloadError, setDownloadError] = useState<string>();
+
+  const selectedDownloadFiles = useMemo<DownloadFile[]>(
+    () =>
+      chat.messages
+        .filter((message) => selectedMessageIds.has(message._id))
+        .flatMap((message) =>
+          message.attachments.flatMap((attachment) =>
+            attachment.url
+              ? [
+                  {
+                    fileName: attachment.fileName,
+                    mimeType: attachment.mimeType,
+                    url: attachment.url,
+                  },
+                ]
+              : [],
+          ),
+        ),
+    [chat.messages, selectedMessageIds],
+  );
 
   useEffect(
     () =>
@@ -138,6 +162,39 @@ export function OneShareApp() {
     if (targets.length > 0) setDeleteTargets(targets);
   }, [chat.messages, selectedMessageIds]);
 
+  async function downloadSelected() {
+    if (isDownloading || selectedDownloadFiles.length === 0) return;
+    setIsDownloading(true);
+    setDownloadNotice(undefined);
+    setDownloadError(undefined);
+
+    try {
+      const result = await downloadFiles(selectedDownloadFiles);
+      if (result.saved > 0) {
+        setDownloadNotice(
+          result.destination === "downloads"
+            ? `Saved ${result.saved} file${result.saved === 1 ? "" : "s"} to Downloads.`
+            : result.destination === "queued"
+              ? `Started ${result.saved} download${result.saved === 1 ? "" : "s"} in Downloads.`
+              : `Started ${result.saved} download${result.saved === 1 ? "" : "s"}.`,
+        );
+      }
+      if (result.failed.length > 0) {
+        setDownloadError(
+          `Couldn't download ${result.failed.length} file${result.failed.length === 1 ? "" : "s"}: ${result.failed.map((file) => file.fileName).join(", ")}`,
+        );
+      }
+    } catch (error) {
+      setDownloadError(
+        error instanceof Error
+          ? error.message
+          : "Couldn't download those files.",
+      );
+    } finally {
+      setIsDownloading(false);
+    }
+  }
+
   async function confirmDelete() {
     if (deleteTargets.length === 0) return;
     setIsDeleting(true);
@@ -164,10 +221,13 @@ export function OneShareApp() {
       <ChatHeader
         isSelectionMode={isSelectionMode}
         selectedMessageCount={selectedMessageIds.size}
+        selectedAttachmentCount={selectedDownloadFiles.length}
+        isDownloading={isDownloading}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
         onStartSelection={() => startSelection()}
         onCancelSelection={cancelSelection}
+        onDownloadSelected={() => void downloadSelected()}
         onDeleteSelected={requestDeleteSelected}
         onSignOut={signOut}
       />
@@ -222,6 +282,32 @@ export function OneShareApp() {
             className="icon-button"
             onClick={() => setDeleteError(undefined)}
             aria-label="Dismiss error"
+          >
+            ×
+          </button>
+        </div>
+      ) : null}
+      {downloadNotice ? (
+        <div className="toast-success" role="status">
+          {downloadNotice}
+          <button
+            type="button"
+            className="icon-button"
+            onClick={() => setDownloadNotice(undefined)}
+            aria-label="Dismiss download notice"
+          >
+            ×
+          </button>
+        </div>
+      ) : null}
+      {downloadError ? (
+        <div className="toast-error" role="alert">
+          {downloadError}
+          <button
+            type="button"
+            className="icon-button"
+            onClick={() => setDownloadError(undefined)}
+            aria-label="Dismiss download error"
           >
             ×
           </button>

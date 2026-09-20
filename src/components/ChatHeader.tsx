@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   ChevronDownIcon,
+  DownloadIcon,
   MoreIcon,
   SearchIcon,
   SelectIcon,
@@ -12,10 +13,13 @@ import {
 interface ChatHeaderProps {
   isSelectionMode: boolean;
   selectedMessageCount: number;
+  selectedAttachmentCount: number;
+  isDownloading: boolean;
   searchQuery: string;
   onSearchChange: (value: string) => void;
   onStartSelection: () => void;
   onCancelSelection: () => void;
+  onDownloadSelected: () => void;
   onDeleteSelected: () => void;
   onSignOut: () => Promise<void>;
 }
@@ -23,10 +27,13 @@ interface ChatHeaderProps {
 export function ChatHeader({
   isSelectionMode,
   selectedMessageCount,
+  selectedAttachmentCount,
+  isDownloading,
   searchQuery,
   onSearchChange,
   onStartSelection,
   onCancelSelection,
+  onDownloadSelected,
   onDeleteSelected,
   onSignOut,
 }: ChatHeaderProps) {
@@ -109,6 +116,9 @@ export function ChatHeader({
             <div className="selection-toolbar">
               <span className="selection-count" aria-live="polite">
                 {selectedMessageCount} selected
+                {selectedAttachmentCount > 0
+                  ? ` · ${selectedAttachmentCount} file${selectedAttachmentCount === 1 ? "" : "s"}`
+                  : ""}
               </span>
               <button
                 type="button"
@@ -121,9 +131,23 @@ export function ChatHeader({
               </button>
               <button
                 type="button"
+                className="selection-download-button"
+                onClick={onDownloadSelected}
+                disabled={selectedAttachmentCount === 0 || isDownloading}
+                title={
+                  selectedAttachmentCount === 0
+                    ? "Select a file or image to download"
+                    : "Download selected files"
+                }
+              >
+                <DownloadIcon size={16} />
+                <span>{isDownloading ? "Downloading…" : "Download"}</span>
+              </button>
+              <button
+                type="button"
                 className="selection-delete-button"
                 onClick={onDeleteSelected}
-                disabled={selectedMessageCount === 0}
+                disabled={selectedMessageCount === 0 || isDownloading}
               >
                 <TrashIcon size={16} />
                 <span>Delete</span>

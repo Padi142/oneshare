@@ -1,19 +1,34 @@
 import { app, BrowserWindow, ipcMain, Menu, shell } from "electron";
 import type { MenuItemConstructorOptions, Rectangle } from "electron";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { readFile, stat } from "node:fs/promises";
+import {
+  createWriteStream,
+  existsSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
+import { mkdir, readFile, rename, stat, unlink } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import { basename, extname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import type { DesktopFile, DesktopMenuAction } from "./types";
+import type {
+  DesktopDownloadFile,
+  DesktopDownloadResult,
+  DesktopFile,
+  DesktopMenuAction,
+} from "./types";
 
 const APP_VERSION_CHANNEL = "app:get-version";
 const OPEN_EXTERNAL_CHANNEL = "shell:open-external";
 const READ_FILE_FROM_PATH_CHANNEL = "file:read-from-path";
+const DOWNLOAD_FILES_CHANNEL = "file:download-files";
 const MENU_ACTION_CHANNEL = "menu:action";
 
 const APP_NAME = "OneShare";
 const MAX_UPLOAD_BYTES = 500 * 1024 * 1024;
+const MAX_DOWNLOAD_FILES = 100;
 const DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL?.trim();
 const MIN_WINDOW_WIDTH = 720;
 const MIN_WINDOW_HEIGHT = 520;
@@ -217,6 +232,131 @@ async function readFileFromPath(value: unknown): Promise<DesktopFile> {
   }
 }
 
+function isDownloadFile(value: unknown): value is DesktopDownloadFile {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.fileName === "string" &&
+    candidate.fileName.trim().length > 0 &&
+    candidate.fileName.length <= 255 &&
+    typeof candidate.url === "string" &&
+    isDownloadUrl(candidate.url)
+  );
+}
+
+function isDownloadUrl(value: string): boolean {
+  try {
+    return new URL(value).protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function parseDownloadFiles(value: unknown): DesktopDownloadFile[] {
+  if (
+    !Array.isArray(value) ||
+    value.length === 0 ||
+    value.length > MAX_DOWNLOAD_FILES ||
+    !value.every(isDownloadFile)
+  ) {
+    throw new Error("Those files could not be downloaded.");
+  }
+
+  return value;
+}
+
+function safeDownloadFileName(value: string): string {
+  const normalized = value
+    .normalize("NFKC")
+    .replace(/[\u0000-\u001f\u007f]/g, "")
+    .replace(/[\\/]/g, "-")
+    .trim();
+  const fileName = basename(normalized);
+  if (!fileName || fileName === "." || fileName === "..") {
+    return "download";
+  }
+  return fileName;
+}
+
+function nextAvailableDownloadPath(downloadsPath: string, fileName: string) {
+  const extension = extname(fileName);
+  const stem = extension ? fileName.slice(0, -extension.length) : fileName;
+  let attempt = 0;
+
+  while (true) {
+    const suffix = attempt === 0 ? "" : ` (${attempt})`;
+    const candidate = join(downloadsPath, `${stem}${suffix}${extension}`);
+    if (!existsSync(candidate)) return candidate;
+    attempt += 1;
+  }
+}
+
+async function downloadOneFile(
+  file: DesktopDownloadFile,
+  downloadsPath: string,
+): Promise<string> {
+  const response = await fetch(file.url);
+  if (!response.ok) {
+    throw new Error(`Download failed (${response.status}).`);
+  }
+
+  const contentLength = Number(response.headers.get("content-length"));
+  if (Number.isFinite(contentLength) && contentLength > MAX_UPLOAD_BYTES) {
+    throw new Error("The file is larger than 500 MB.");
+  }
+
+  if (!response.body) {
+    throw new Error("The download had no file contents.");
+  }
+
+  const fileName = safeDownloadFileName(file.fileName);
+  const destination = nextAvailableDownloadPath(downloadsPath, fileName);
+  const temporaryPath = join(downloadsPath, `.oneshare-${randomUUID()}.tmp`);
+
+  try {
+    const nodeResponseBody = response.body as unknown as Parameters<
+      typeof Readable.fromWeb
+    >[0];
+    await pipeline(
+      Readable.fromWeb(nodeResponseBody),
+      createWriteStream(temporaryPath, { flags: "wx" }),
+    );
+    const downloadedStats = await stat(temporaryPath);
+    if (downloadedStats.size > MAX_UPLOAD_BYTES) {
+      throw new Error("The file is larger than 500 MB.");
+    }
+    await rename(temporaryPath, destination);
+    return basename(destination);
+  } catch (error) {
+    await unlink(temporaryPath).catch(() => undefined);
+    throw error;
+  }
+}
+
+async function downloadFiles(value: unknown): Promise<DesktopDownloadResult> {
+  const files = parseDownloadFiles(value);
+  const downloadsPath = app.getPath("downloads");
+  await mkdir(downloadsPath, { recursive: true });
+
+  const saved: string[] = [];
+  const failed: DesktopDownloadResult["failed"] = [];
+  for (const file of files) {
+    try {
+      saved.push(await downloadOneFile(file, downloadsPath));
+    } catch (error) {
+      failed.push({
+        fileName: file.fileName,
+        reason:
+          error instanceof Error && error.message
+            ? error.message
+            : "Download failed.",
+      });
+    }
+  }
+
+  return { saved, failed };
+}
+
 function isRendererUrl(url: string): boolean {
   if (DEV_SERVER_URL) {
     try {
@@ -321,6 +461,9 @@ function registerIpcHandlers(): void {
   );
   ipcMain.handle(READ_FILE_FROM_PATH_CHANNEL, (_event, value: unknown) =>
     readFileFromPath(value),
+  );
+  ipcMain.handle(DOWNLOAD_FILES_CHANNEL, (_event, value: unknown) =>
+    downloadFiles(value),
   );
 }
 

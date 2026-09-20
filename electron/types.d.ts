@@ -18,12 +18,27 @@ export interface DesktopFile {
   contents: ArrayBuffer;
 }
 
+export interface DesktopDownloadFile {
+  fileName: string;
+  mimeType?: string;
+  url: string;
+}
+
+export interface DesktopDownloadResult {
+  saved: string[];
+  failed: Array<{
+    fileName: string;
+    reason: string;
+  }>;
+}
+
 export interface DesktopBridge {
   readonly isElectron: true;
   readonly platform: DesktopPlatform;
   getAppVersion(): Promise<string>;
   openExternal(url: string): Promise<boolean>;
   readFileFromPath(path: string): Promise<DesktopFile>;
+  downloadFiles(files: DesktopDownloadFile[]): Promise<DesktopDownloadResult>;
   onMenuAction(listener: (action: DesktopMenuAction) => void): () => void;
 }
 

@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from "electron";
 
 import type {
   DesktopBridge,
+  DesktopDownloadFile,
   DesktopFile,
   DesktopMenuAction,
   DesktopPlatform,
@@ -10,6 +11,7 @@ import type {
 const APP_VERSION_CHANNEL = "app:get-version";
 const OPEN_EXTERNAL_CHANNEL = "shell:open-external";
 const READ_FILE_FROM_PATH_CHANNEL = "file:read-from-path";
+const DOWNLOAD_FILES_CHANNEL = "file:download-files";
 const MENU_ACTION_CHANNEL = "menu:action";
 
 const MENU_ACTIONS = new Set<DesktopMenuAction>([
@@ -27,6 +29,8 @@ const bridge: DesktopBridge = Object.freeze({
       READ_FILE_FROM_PATH_CHANNEL,
       path,
     ) as Promise<DesktopFile>,
+  downloadFiles: (files: DesktopDownloadFile[]) =>
+    ipcRenderer.invoke(DOWNLOAD_FILES_CHANNEL, files),
   onMenuAction: (listener: (action: DesktopMenuAction) => void) => {
     const wrappedListener = (
       _event: Electron.IpcRendererEvent,

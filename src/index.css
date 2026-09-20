@@ -579,6 +579,30 @@ textarea:focus-visible {
   letter-spacing: 0.04em;
   white-space: nowrap;
 }
+.selection-download-button {
+  display: flex;
+  height: 38px;
+  padding: 0 11px;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  color: #fff8ef;
+  background: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background 150ms ease,
+    transform 150ms ease;
+}
+.selection-download-button:hover:not(:disabled) {
+  background: var(--accent-dark);
+}
+.selection-download-button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
 .selection-delete-button {
   display: flex;
   height: 38px;
@@ -799,6 +823,9 @@ textarea:focus-visible {
   overflow: hidden;
   border-radius: 6px 1px 1px 6px;
 }
+.media-preview-link {
+  display: block;
+}
 .media-copy-status {
   position: absolute;
   top: 10px;
@@ -815,17 +842,25 @@ textarea:focus-visible {
   pointer-events: none;
 }
 .media-preview img,
-video.media-preview {
+video.media-preview-video {
   display: block;
   width: 100%;
   max-height: 430px;
   object-fit: cover;
 }
-video.media-preview {
-  margin: -7px -8px 8px;
-  width: calc(100% + 16px);
-  border-radius: 6px 1px 1px 6px;
+.media-preview-video {
   background: #141713;
+}
+.media-download {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  color: var(--paper);
+  background: rgb(29 33 29 / 0.88);
+}
+.media-download:hover {
+  color: #fff;
+  background: var(--accent-dark);
 }
 .file-card {
   display: flex;
@@ -1227,6 +1262,22 @@ video.media-preview {
   font-size: 11px;
   box-shadow: 4px 4px 0 rgb(29 33 29 / 0.14);
 }
+.toast-success {
+  position: fixed;
+  right: 20px;
+  bottom: 68px;
+  z-index: 120;
+  display: flex;
+  max-width: 380px;
+  padding: 10px 10px 10px 14px;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--sage);
+  background: var(--paper);
+  color: #406353;
+  font-size: 11px;
+  box-shadow: 4px 4px 0 rgb(29 33 29 / 0.14);
+}
 .boot-screen {
   display: grid;
   height: 100dvh;
@@ -1365,6 +1416,9 @@ video.media-preview {
     display: none;
   }
   .selection-delete-button span {
+    display: none;
+  }
+  .selection-download-button span {
     display: none;
   }
   .empty-messages {

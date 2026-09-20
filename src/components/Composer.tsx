@@ -110,6 +110,10 @@ export function Composer({ onSendMessage, onUploadFile }: ComposerProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const dragDepth = useRef(0);
   const previewUrlsRef = useRef(new Set<string>());
+  const uploadTasksRef = useRef(
+    new Map<string, Promise<SendAttachmentInput>>(),
+  );
+  const uploadedAttachmentsRef = useRef(new Map<string, SendAttachmentInput>());
 
   useLayoutEffect(() => {
     const textarea = textareaRef.current;
@@ -122,6 +126,8 @@ export function Composer({ onSendMessage, onUploadFile }: ComposerProps) {
     () => () => {
       previewUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
       previewUrlsRef.current.clear();
+      uploadTasksRef.current.clear();
+      uploadedAttachmentsRef.current.clear();
     },
     [],
   );
@@ -148,6 +154,9 @@ export function Composer({ onSendMessage, onUploadFile }: ComposerProps) {
         };
       });
       setStaged((current) => [...current, ...next]);
+      next.forEach((item) => {
+        void uploadOne(item).catch(() => undefined);
+      });
       setError(undefined);
       return next;
     },
@@ -161,68 +170,94 @@ export function Composer({ onSendMessage, onUploadFile }: ComposerProps) {
         URL.revokeObjectURL(item.previewUrl);
         previewUrlsRef.current.delete(item.previewUrl);
       }
+      uploadedAttachmentsRef.current.delete(id);
       return current.filter((candidate) => candidate.id !== id);
     });
   }
 
-  async function uploadOne(
-    item: StagedAttachment,
-  ): Promise<SendAttachmentInput> {
-    setStaged((current) =>
-      current.map((candidate) =>
-        candidate.id === item.id
-          ? { ...candidate, state: "uploading", progress: 0, error: undefined }
-          : candidate,
-      ),
-    );
-    try {
-      const result = await onUploadFile(item.file, (progress) => {
+  function uploadOne(item: StagedAttachment): Promise<SendAttachmentInput> {
+    const uploadedAttachment = uploadedAttachmentsRef.current.get(item.id);
+    if (uploadedAttachment) return Promise.resolve(uploadedAttachment);
+
+    const existingTask = uploadTasksRef.current.get(item.id);
+    if (existingTask) return existingTask;
+
+    const task = (async (): Promise<SendAttachmentInput> => {
+      setStaged((current) =>
+        current.map((candidate) =>
+          candidate.id === item.id
+            ? {
+                ...candidate,
+                state: "uploading",
+                progress: 0,
+                error: undefined,
+              }
+            : candidate,
+        ),
+      );
+      try {
+        const result = await onUploadFile(item.file, (progress) => {
+          setStaged((current) =>
+            current.map((candidate) =>
+              candidate.id === item.id ? { ...candidate, progress } : candidate,
+            ),
+          );
+        });
+        const metadata = await mediaMetadata(
+          item.file,
+          item.kind,
+          item.previewUrl,
+        );
+        const attachment = {
+          storageId: result.storageId,
+          kind: item.kind,
+          fileName: item.file.name,
+          ...(item.file.type ? { mimeType: item.file.type } : {}),
+          ...metadata,
+        } satisfies SendAttachmentInput;
+        uploadedAttachmentsRef.current.set(item.id, attachment);
         setStaged((current) =>
           current.map((candidate) =>
-            candidate.id === item.id ? { ...candidate, progress } : candidate,
+            candidate.id === item.id
+              ? { ...candidate, state: "sent", progress: 100 }
+              : candidate,
           ),
         );
-      });
-      const metadata = await mediaMetadata(
-        item.file,
-        item.kind,
-        item.previewUrl,
-      );
-      setStaged((current) =>
-        current.map((candidate) =>
-          candidate.id === item.id
-            ? { ...candidate, state: "sent", progress: 100 }
-            : candidate,
-        ),
-      );
-      return {
-        storageId: result.storageId,
-        kind: item.kind,
-        fileName: item.file.name,
-        ...(item.file.type ? { mimeType: item.file.type } : {}),
-        ...metadata,
-      };
-    } catch (caught) {
-      const message = uploadError(caught);
-      setStaged((current) =>
-        current.map((candidate) =>
-          candidate.id === item.id
-            ? { ...candidate, state: "error", error: message }
-            : candidate,
-        ),
-      );
-      throw new Error(message);
-    }
+        return attachment;
+      } catch (caught) {
+        const message = uploadError(caught);
+        setStaged((current) =>
+          current.map((candidate) =>
+            candidate.id === item.id
+              ? { ...candidate, state: "error", error: message }
+              : candidate,
+          ),
+        );
+        throw new Error(message);
+      }
+    })();
+
+    uploadTasksRef.current.set(item.id, task);
+    void task.then(
+      () => uploadTasksRef.current.delete(item.id),
+      () => uploadTasksRef.current.delete(item.id),
+    );
+    return task;
   }
 
   async function retryFile(item: StagedAttachment) {
+    if (isSending) return;
     setError(undefined);
+    setIsSending(true);
     try {
       const attachment = await uploadOne(item);
       await onSendMessage("", [attachment]);
       removeFile(item.id);
     } catch (caught) {
       setError(uploadError(caught));
+    } finally {
+      setIsSending(false);
+      textareaRef.current?.focus();
     }
   }
 
@@ -231,12 +266,13 @@ export function Composer({ onSendMessage, onUploadFile }: ComposerProps) {
     setError(undefined);
     setIsSending(true);
     try {
-      const attachments: SendAttachmentInput[] = [];
-      for (const item of staged) attachments.push(await uploadOne(item));
+      const items = [...staged];
+      const attachments = await Promise.all(items.map(uploadOne));
       await onSendMessage(text, attachments);
-      staged.forEach((item) => {
+      items.forEach((item) => {
         URL.revokeObjectURL(item.previewUrl);
         previewUrlsRef.current.delete(item.previewUrl);
+        uploadedAttachmentsRef.current.delete(item.id);
       });
       setStaged([]);
       setText("");
@@ -356,7 +392,15 @@ export function Composer({ onSendMessage, onUploadFile }: ComposerProps) {
     };
   }, [addFiles]);
 
+  const isUploading = staged.some((item) => item.state === "uploading");
   const canSend = !isSending && Boolean(text.trim() || staged.length);
+  const composerStatus = isSending
+    ? isUploading
+      ? "Waiting for upload"
+      : "Sending"
+    : isUploading
+      ? "Uploading"
+      : undefined;
 
   return (
     <div className="composer-wrap">
@@ -475,9 +519,9 @@ export function Composer({ onSendMessage, onUploadFile }: ComposerProps) {
             </>
           )}
         </span>
-        {isSending ? (
+        {composerStatus ? (
           <span className="composer-status">
-            <LoaderIcon className="spin" size={14} /> Uploading
+            <LoaderIcon className="spin" size={14} /> {composerStatus}
           </span>
         ) : null}
       </div>

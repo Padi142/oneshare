@@ -5,6 +5,7 @@ import {
   DownloadIcon,
   FileIcon,
   ImageIcon,
+  LoaderIcon,
   SelectIcon,
   TrashIcon,
   VideoIcon,
@@ -15,6 +16,7 @@ import {
   formatTime,
   messageText,
 } from "../lib/utils";
+import { downloadFiles } from "../lib/download";
 import type { MessageAttachment } from "../types";
 import type { LocalMessage } from "../hooks/useChat";
 
@@ -107,27 +109,117 @@ function ImagePreview({ attachment }: { attachment: MessageAttachment }) {
           : "Right-click to copy image";
 
   return (
-    <a
-      className="media-preview"
-      href={attachment.url ?? undefined}
-      target="_blank"
-      rel="noreferrer"
-      aria-label={`Open ${attachment.fileName} in a browser`}
-      title={`${attachment.fileName} · ${copyMessage}`}
-      onClick={openImage}
-      onContextMenu={(event) => void copyImage(event)}
-    >
-      <img
-        src={attachment.url ?? undefined}
-        alt={attachment.fileName}
-        loading="lazy"
-      />
+    <div className="media-preview">
+      <a
+        className="media-preview-link"
+        href={attachment.url ?? undefined}
+        target="_blank"
+        rel="noreferrer"
+        aria-label={`Open ${attachment.fileName} in a browser`}
+        title={`${attachment.fileName} · ${copyMessage}`}
+        onClick={openImage}
+        onContextMenu={(event) => void copyImage(event)}
+      >
+        <img
+          src={attachment.url ?? undefined}
+          alt={attachment.fileName}
+          loading="lazy"
+        />
+      </a>
+      <AttachmentDownloadButton attachment={attachment} />
       {copyState !== "idle" ? (
         <span className="media-copy-status" role="status" aria-live="polite">
           {copyMessage}
         </span>
       ) : null}
-    </a>
+    </div>
+  );
+}
+
+function AttachmentDownloadButton({
+  attachment,
+  className = "media-download",
+}: {
+  attachment: MessageAttachment;
+  className?: string;
+}) {
+  const [state, setState] = useState<
+    "idle" | "downloading" | "downloaded" | "error"
+  >("idle");
+
+  useEffect(() => {
+    if (state === "idle" || state === "downloading") return;
+    const timeout = window.setTimeout(() => setState("idle"), 1800);
+    return () => window.clearTimeout(timeout);
+  }, [state]);
+
+  const url = attachment.url;
+  if (typeof url !== "string" || url.length === 0) return null;
+
+  async function handleDownload(
+    event: React.MouseEvent<HTMLButtonElement>,
+    downloadUrl: string,
+  ) {
+    event.preventDefault();
+    event.stopPropagation();
+    setState("downloading");
+    try {
+      const result = await downloadFiles([
+        {
+          fileName: attachment.fileName,
+          mimeType: attachment.mimeType,
+          url: downloadUrl,
+        },
+      ]);
+      const failure = result.failed[0];
+      if (failure) throw new Error(failure.reason);
+      setState("downloaded");
+    } catch {
+      setState("error");
+    }
+  }
+
+  const label =
+    state === "downloading"
+      ? `Downloading ${attachment.fileName}`
+      : state === "downloaded"
+        ? `${attachment.fileName} downloaded`
+        : state === "error"
+          ? `Couldn't download ${attachment.fileName}`
+          : `Download ${attachment.fileName}`;
+
+  return (
+    <button
+      type="button"
+      className={`icon-button ${className}`}
+      onClick={(event) => void handleDownload(event, url)}
+      disabled={state === "downloading"}
+      aria-label={label}
+      title={label}
+    >
+      {state === "downloading" ? (
+        <LoaderIcon className="spin" size={16} />
+      ) : state === "downloaded" ? (
+        <CheckDoubleIcon size={16} />
+      ) : (
+        <DownloadIcon size={16} />
+      )}
+    </button>
+  );
+}
+
+function VideoPreview({ attachment }: { attachment: MessageAttachment }) {
+  return (
+    <div className="media-preview">
+      <video
+        className="media-preview-video"
+        src={attachment.url ?? undefined}
+        controls
+        preload="metadata"
+        aria-label={attachment.fileName}
+      />
+      <AttachmentDownloadButton attachment={attachment} />
+    </div>
   );
 }
 
@@ -139,15 +231,7 @@ function AttachmentVisual({ attachment }: { attachment: MessageAttachment }) {
     if (attachment.kind === "image") {
       return <ImagePreview attachment={attachment} />;
     }
-    return (
-      <video
-        className="media-preview"
-        src={attachment.url}
-        controls
-        preload="metadata"
-        aria-label={attachment.fileName}
-      />
-    );
+    return <VideoPreview attachment={attachment} />;
   }
 
   const isImage = attachment.kind === "image";
@@ -172,16 +256,10 @@ function AttachmentVisual({ attachment }: { attachment: MessageAttachment }) {
             : ""}
         </small>
       </span>
-      {attachment.url ? (
-        <a
-          className="icon-button file-download"
-          href={attachment.url}
-          download={attachment.fileName}
-          aria-label={`Download ${attachment.fileName}`}
-        >
-          <DownloadIcon size={17} />
-        </a>
-      ) : null}
+      <AttachmentDownloadButton
+        attachment={attachment}
+        className="file-download"
+      />
     </div>
   );
 }
