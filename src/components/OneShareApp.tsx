@@ -1,12 +1,38 @@
 import { useAuthActions } from "@convex-dev/auth/react";
+import { useQuery } from "convex/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { api } from "../../convex/_generated/api";
 import { ChatHeader } from "./ChatHeader";
 import { Composer } from "./Composer";
 import { DeleteDialog } from "./DeleteDialog";
+import { FilterBar } from "./FilterBar";
+import type { LabelState } from "./LabelPicker";
 import { MessageList } from "./MessageList";
 import { ArrowDownIcon, XIcon } from "../lib/icons";
 import { useChat, type LocalMessage } from "../hooks/useChat";
 import { downloadFiles, type DownloadFile } from "../lib/download";
+import {
+  facetForFilter,
+  TYPE_FILTERS,
+  viewForFilter,
+  type Filter,
+} from "../lib/facets";
+
+function emptyStateFor(filter: Filter) {
+  if (filter.kind === "type") {
+    return {
+      title: TYPE_FILTERS[filter.type].empty,
+      body: "They show up here as soon as you send one.",
+    };
+  }
+  if (filter.kind === "label") {
+    return {
+      title: `Nothing labelled #${filter.name}`,
+      body: `Write #${filter.name} in a message, or use the tag button on any message.`,
+    };
+  }
+  return undefined;
+}
 
 function Toast({
   tone,
@@ -46,7 +72,15 @@ function Toast({
 
 export function OneShareApp() {
   const { signOut } = useAuthActions();
-  const chat = useChat();
+  const [filter, setFilter] = useState<Filter>({ kind: "all" });
+  const facet = facetForFilter(filter);
+  const chat = useChat(facet);
+  const facets = useQuery(api.facets.listFacets);
+  const allLabels = useMemo(
+    () => facets?.labels.map((label) => label.name) ?? [],
+    [facets],
+  );
+  const view = useMemo(() => viewForFilter(filter), [filter]);
   const scrollerRef = useRef<HTMLDivElement>(null);
   const hasInitialScroll = useRef(false);
   const previousMessageCount = useRef(0);
@@ -64,25 +98,30 @@ export function OneShareApp() {
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadNotice, setDownloadNotice] = useState<string>();
   const [downloadError, setDownloadError] = useState<string>();
+  const [labelError, setLabelError] = useState<string>();
+
+  const selectedMessages = useMemo(
+    () =>
+      chat.messages.filter((message) => selectedMessageIds.has(message._id)),
+    [chat.messages, selectedMessageIds],
+  );
 
   const selectedDownloadFiles = useMemo<DownloadFile[]>(
     () =>
-      chat.messages
-        .filter((message) => selectedMessageIds.has(message._id))
-        .flatMap((message) =>
-          message.attachments.flatMap((attachment) =>
-            attachment.url
-              ? [
-                  {
-                    fileName: attachment.fileName,
-                    mimeType: attachment.mimeType,
-                    url: attachment.url,
-                  },
-                ]
-              : [],
-          ),
+      selectedMessages.flatMap((message) =>
+        message.attachments.flatMap((attachment) =>
+          attachment.url
+            ? [
+                {
+                  fileName: attachment.fileName,
+                  mimeType: attachment.mimeType,
+                  url: attachment.url,
+                },
+              ]
+            : [],
         ),
-    [chat.messages, selectedMessageIds],
+      ),
+    [selectedMessages],
   );
 
   useEffect(
@@ -187,16 +226,55 @@ export function OneShareApp() {
     setSelectedMessageIds(new Set());
   }, []);
 
+  const changeFilter = useCallback(
+    (next: Filter) => {
+      setFilter(next);
+      cancelSelection();
+      hasInitialScroll.current = false;
+      previousMessageCount.current = 0;
+      setShowJumpButton(false);
+      setNewMessageCount(0);
+    },
+    [cancelSelection],
+  );
+
+  const selectLabel = useCallback(
+    (name: string) => changeFilter({ kind: "label", name }),
+    [changeFilter],
+  );
+
+  const setLabel = useCallback(
+    (messageIds: string[], name: string, applied: boolean) => {
+      setLabelError(undefined);
+      chat.setLabel(messageIds, name, applied).catch((error: unknown) => {
+        setLabelError(
+          error instanceof Error
+            ? error.message
+            : "Couldn't change that label.",
+        );
+      });
+    },
+    [chat.setLabel],
+  );
+
+  const selectedLabelState = useCallback(
+    (name: string): LabelState => {
+      const count = selectedMessages.filter((message) =>
+        message.labels?.some((label) => label.name === name),
+      ).length;
+      if (count === 0) return "none";
+      return count === selectedMessages.length ? "all" : "some";
+    },
+    [selectedMessages],
+  );
+
   const requestDelete = useCallback((message: LocalMessage) => {
     setDeleteTargets([message]);
   }, []);
 
   const requestDeleteSelected = useCallback(() => {
-    const targets = chat.messages.filter((message) =>
-      selectedMessageIds.has(message._id),
-    );
-    if (targets.length > 0) setDeleteTargets(targets);
-  }, [chat.messages, selectedMessageIds]);
+    if (selectedMessages.length > 0) setDeleteTargets(selectedMessages);
+  }, [selectedMessages]);
 
   async function downloadSelected() {
     if (isDownloading || selectedDownloadFiles.length === 0) return;
@@ -260,6 +338,15 @@ export function OneShareApp() {
         selectedAttachmentCount={selectedDownloadFiles.length}
         isDownloading={isDownloading}
         searchQuery={searchQuery}
+        allLabels={allLabels}
+        selectedLabelState={selectedLabelState}
+        onToggleSelectedLabel={(name, applied) =>
+          setLabel(
+            selectedMessages.map((message) => message._id),
+            name,
+            applied,
+          )
+        }
         onSearchChange={setSearchQuery}
         onStartSelection={() => startSelection()}
         onCancelSelection={cancelSelection}
@@ -267,6 +354,17 @@ export function OneShareApp() {
         onDeleteSelected={requestDeleteSelected}
         onSignOut={signOut}
       />
+      {facets &&
+      (facets.types.length > 0 ||
+        facets.labels.length > 0 ||
+        filter.kind !== "all") ? (
+        <FilterBar
+          filter={filter}
+          types={facets.types}
+          labels={allLabels}
+          onChange={changeFilter}
+        />
+      ) : null}
       <main className="chat-main">
         <MessageList
           messages={chat.messages}
@@ -274,6 +372,9 @@ export function OneShareApp() {
           isSelectionMode={isSelectionMode}
           selectedMessageIds={selectedMessageIds}
           searchQuery={searchQuery}
+          view={view}
+          emptyState={emptyStateFor(filter)}
+          allLabels={allLabels}
           paginationStatus={chat.paginationStatus}
           onLoadMore={() => chat.loadMore(32)}
           onScroll={handleScroll}
@@ -281,6 +382,8 @@ export function OneShareApp() {
           onStartSelection={startSelection}
           onToggleSelect={toggleSelect}
           onRequestDelete={requestDelete}
+          onSetLabel={setLabel}
+          onSelectLabel={selectLabel}
         />
         {showJumpButton ? (
           <button
@@ -296,6 +399,7 @@ export function OneShareApp() {
           </button>
         ) : null}
         <Composer
+          activeLabel={filter.kind === "label" ? filter.name : undefined}
           onSendMessage={chat.sendMessage}
           onUploadFile={chat.uploadFile}
         />
@@ -323,6 +427,13 @@ export function OneShareApp() {
             tone="error"
             message={deleteError}
             onDismiss={() => setDeleteError(undefined)}
+          />
+        ) : null}
+        {labelError ? (
+          <Toast
+            tone="error"
+            message={labelError}
+            onDismiss={() => setLabelError(undefined)}
           />
         ) : null}
         {downloadError ? (

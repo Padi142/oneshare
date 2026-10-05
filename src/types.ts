@@ -14,11 +14,17 @@ export interface MessageAttachment {
   durationMs?: number;
 }
 
+export interface MessageLabel {
+  name: string;
+  source: "system" | "user" | "ai";
+}
+
 export interface MessageRecord {
   _id: string;
   _creationTime: number;
   text?: string;
   attachments: MessageAttachment[];
+  labels?: MessageLabel[];
   senderId?: string;
   deletedAt?: number;
 }

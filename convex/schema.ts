@@ -8,6 +8,12 @@ const messageKindValidator = v.union(
   v.literal("video"),
 );
 
+const facetSourceValidator = v.union(
+  v.literal("system"),
+  v.literal("user"),
+  v.literal("ai"),
+);
+
 /**
  * Attachments are separate documents so storage ownership and cleanup can be
  * indexed without scanning every message in an account.
@@ -33,6 +39,28 @@ const schema = defineSchema({
     .index("by_message", ["messageId"])
     .index("by_storage", ["storageId"])
     .index("by_user", ["userId"]),
+  /** Labels exist while at least one message uses them. */
+  labels: defineTable({
+    userId: v.id("users"),
+    name: v.string(),
+    // Explains the label to a future automatic classifier.
+    description: v.optional(v.string()),
+  }).index("by_user_name", ["userId", "name"]),
+  /**
+   * One row per filterable property of a message ("type:pdf", "label:todo"),
+   * so every filter paginates straight off an index. The message's creation
+   * time is copied in so a filtered list sorts by message, not tagging, time.
+   */
+  messageFacets: defineTable({
+    userId: v.id("users"),
+    messageId: v.id("messages"),
+    facet: v.string(),
+    messageCreationTime: v.number(),
+    source: facetSourceValidator,
+    confidence: v.optional(v.number()),
+  })
+    .index("by_user_facet_time", ["userId", "facet", "messageCreationTime"])
+    .index("by_message", ["messageId"]),
 });
 
 export default schema;

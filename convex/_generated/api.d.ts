@@ -9,8 +9,11 @@
  */
 
 import type * as auth from "../auth.js";
+import type * as facets from "../facets.js";
 import type * as http from "../http.js";
 import type * as lib_authorization from "../lib/authorization.js";
+import type * as lib_facetStore from "../lib/facetStore.js";
+import type * as lib_facets from "../lib/facets.js";
 import type * as messages from "../messages.js";
 
 import type {
@@ -21,8 +24,11 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   auth: typeof auth;
+  facets: typeof facets;
   http: typeof http;
   "lib/authorization": typeof lib_authorization;
+  "lib/facetStore": typeof lib_facetStore;
+  "lib/facets": typeof lib_facets;
   messages: typeof messages;
 }>;
 

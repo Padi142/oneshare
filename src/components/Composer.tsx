@@ -11,9 +11,11 @@ import {
   LoaderIcon,
   PaperclipIcon,
   SendIcon,
+  TagIcon,
   VideoIcon,
   XIcon,
 } from "../lib/icons";
+import { labelHue } from "../lib/facets";
 import { formatBytes, kindForFile, MAX_UPLOAD_BYTES } from "../lib/utils";
 import type {
   SendAttachmentInput,
@@ -22,9 +24,12 @@ import type {
 } from "../types";
 
 interface ComposerProps {
+  /** Label of the current filter, added to new messages unless dismissed. */
+  activeLabel?: string;
   onSendMessage: (
     text: string,
     attachments: SendAttachmentInput[],
+    labels: string[],
   ) => Promise<void>;
   onUploadFile: (
     file: File,
@@ -100,8 +105,20 @@ function looksLikeDesktopFilePath(value: string): boolean {
   );
 }
 
-export function Composer({ onSendMessage, onUploadFile }: ComposerProps) {
+export function Composer({
+  activeLabel,
+  onSendMessage,
+  onUploadFile,
+}: ComposerProps) {
   const [text, setText] = useState("");
+  const [dismissedLabel, setDismissedLabel] = useState<string>();
+  const appliedLabel =
+    activeLabel !== undefined && activeLabel !== dismissedLabel
+      ? activeLabel
+      : undefined;
+  const appliedLabels = appliedLabel ? [appliedLabel] : [];
+
+  useEffect(() => setDismissedLabel(undefined), [activeLabel]);
   const [staged, setStaged] = useState<StagedAttachment[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [isSending, setIsSending] = useState(false);
@@ -251,7 +268,7 @@ export function Composer({ onSendMessage, onUploadFile }: ComposerProps) {
     setIsSending(true);
     try {
       const attachment = await uploadOne(item);
-      await onSendMessage("", [attachment]);
+      await onSendMessage("", [attachment], appliedLabels);
       removeFile(item.id);
     } catch (caught) {
       setError(uploadError(caught));
@@ -268,7 +285,7 @@ export function Composer({ onSendMessage, onUploadFile }: ComposerProps) {
     try {
       const items = [...staged];
       const attachments = await Promise.all(items.map(uploadOne));
-      await onSendMessage(text, attachments);
+      await onSendMessage(text, attachments, appliedLabels);
       items.forEach((item) => {
         URL.revokeObjectURL(item.previewUrl);
         previewUrlsRef.current.delete(item.previewUrl);
@@ -308,7 +325,7 @@ export function Composer({ onSendMessage, onUploadFile }: ComposerProps) {
       const [item] = addFiles([file]);
       if (!item) return;
       const attachment = await uploadOne(item);
-      await onSendMessage("", [attachment]);
+      await onSendMessage("", [attachment], appliedLabels);
       removeFile(item.id);
     } catch (caught) {
       setError(uploadError(caught));
@@ -415,6 +432,28 @@ export function Composer({ onSendMessage, onUploadFile }: ComposerProps) {
         </p>
       ) : null}
       <div className="composer-box">
+        {appliedLabel ? (
+          <div className="composer-label">
+            <span
+              className="composer-label-chip"
+              style={
+                { "--label-hue": labelHue(appliedLabel) } as React.CSSProperties
+              }
+            >
+              <TagIcon size={13} />
+              Adds <strong>#{appliedLabel}</strong>
+              <button
+                type="button"
+                className="composer-label-remove"
+                onClick={() => setDismissedLabel(appliedLabel)}
+                aria-label={`Don't add #${appliedLabel}`}
+                title={`Don't add #${appliedLabel}`}
+              >
+                <XIcon size={12} />
+              </button>
+            </span>
+          </div>
+        ) : null}
         {staged.length > 0 ? (
           <ul className="staged-list" aria-label="Attachments">
             {staged.map((item) => (

@@ -1,8 +1,22 @@
-import type { RefObject, UIEvent } from "react";
+import type { ReactNode, RefObject, UIEvent } from "react";
 import { BrandMark } from "./BrandMark";
-import { MessageBubble } from "./MessageBubble";
-import { formatDate, isSameDate, matchesSearch } from "../lib/utils";
+import { LabelPills } from "./LabelPills";
+import {
+  AttachmentDownloadButton,
+  AttachmentVisual,
+  MessageBubble,
+} from "./MessageBubble";
+import { CheckIcon } from "../lib/icons";
+import { fileIconFor, type MessageView } from "../lib/facets";
+import {
+  formatBytes,
+  formatDate,
+  formatTime,
+  isSameDate,
+  matchesSearch,
+} from "../lib/utils";
 import type { LocalMessage } from "../hooks/useChat";
+import type { MessageAttachment } from "../types";
 
 interface MessageListProps {
   messages: LocalMessage[];
@@ -10,6 +24,9 @@ interface MessageListProps {
   isSelectionMode: boolean;
   selectedMessageIds: ReadonlySet<string>;
   searchQuery: string;
+  view: MessageView;
+  emptyState?: { title: string; body: string };
+  allLabels: string[];
   paginationStatus:
     "LoadingFirstPage" | "CanLoadMore" | "LoadingMore" | "Exhausted";
   onLoadMore: () => void;
@@ -18,6 +35,8 @@ interface MessageListProps {
   onStartSelection: (messageId: string) => void;
   onToggleSelect: (messageId: string) => void;
   onRequestDelete: (message: LocalMessage) => void;
+  onSetLabel: (messageIds: string[], name: string, applied: boolean) => void;
+  onSelectLabel: (name: string) => void;
 }
 
 function LoadingMessages() {
@@ -30,12 +49,26 @@ function LoadingMessages() {
   );
 }
 
-function EmptyMessages({ hasSearch }: { hasSearch: boolean }) {
+function EmptyMessages({
+  hasSearch,
+  emptyState,
+}: {
+  hasSearch: boolean;
+  emptyState?: { title: string; body: string };
+}) {
   if (hasSearch) {
     return (
       <div className="empty-messages">
         <h2>No matches</h2>
         <p>Try another word or part of a file name.</p>
+      </div>
+    );
+  }
+  if (emptyState) {
+    return (
+      <div className="empty-messages">
+        <h2>{emptyState.title}</h2>
+        <p>{emptyState.body}</p>
       </div>
     );
   }
@@ -51,12 +84,119 @@ function EmptyMessages({ hasSearch }: { hasSearch: boolean }) {
   );
 }
 
+interface ViewItemProps {
+  message: LocalMessage;
+  attachment: MessageAttachment;
+  isSelectionMode: boolean;
+  isSelected: boolean;
+  onToggleSelect: (messageId: string) => void;
+}
+
+function SelectOverlay({
+  messageId,
+  isSelected,
+  onToggleSelect,
+}: {
+  messageId: string;
+  isSelected: boolean;
+  onToggleSelect: (messageId: string) => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="message-select"
+      onClick={() => onToggleSelect(messageId)}
+      aria-pressed={isSelected}
+      aria-label={isSelected ? "Deselect message" : "Select message"}
+    >
+      <span className="message-check" aria-hidden="true">
+        {isSelected ? <CheckIcon size={14} strokeWidth={2.6} /> : null}
+      </span>
+    </button>
+  );
+}
+
+function GridTile({
+  message,
+  attachment,
+  isSelectionMode,
+  isSelected,
+  onToggleSelect,
+}: ViewItemProps) {
+  return (
+    <div
+      className={`grid-tile ${isSelected ? "grid-tile--selected" : ""}`}
+      title={message.text}
+    >
+      <AttachmentVisual attachment={attachment} />
+      {isSelectionMode ? (
+        <SelectOverlay
+          messageId={message._id}
+          isSelected={isSelected}
+          onToggleSelect={onToggleSelect}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function FileRow({
+  message,
+  attachment,
+  isSelectionMode,
+  isSelected,
+  onToggleSelect,
+  onSelectLabel,
+}: ViewItemProps & { onSelectLabel: (name: string) => void }) {
+  const Icon = fileIconFor(attachment);
+  return (
+    <div
+      className={[
+        "file-row",
+        isSelectionMode ? "file-row--selecting" : "",
+        isSelected ? "file-row--selected" : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
+    >
+      {isSelectionMode ? (
+        <SelectOverlay
+          messageId={message._id}
+          isSelected={isSelected}
+          onToggleSelect={onToggleSelect}
+        />
+      ) : null}
+      <span className="file-icon">
+        <Icon size={20} />
+      </span>
+      <span className="file-row-copy">
+        <strong title={attachment.fileName}>{attachment.fileName}</strong>
+        <small>
+          {formatBytes(attachment.sizeBytes)} ·{" "}
+          {formatTime(message._creationTime)}
+          {message.text ? (
+            <span title={message.text}> · {message.text}</span>
+          ) : null}
+        </small>
+      </span>
+      <LabelPills labels={message.labels ?? []} onSelect={onSelectLabel} />
+      <AttachmentDownloadButton
+        attachment={attachment}
+        className="file-download"
+      />
+    </div>
+  );
+}
+
 export function MessageList({
   messages,
   isLoading,
   isSelectionMode,
   selectedMessageIds,
   searchQuery,
+  view,
+  emptyState,
+  allLabels,
   paginationStatus,
   onLoadMore,
   onScroll,
@@ -64,11 +204,61 @@ export function MessageList({
   onStartSelection,
   onToggleSelect,
   onRequestDelete,
+  onSetLabel,
+  onSelectLabel,
 }: MessageListProps) {
   const filtered = messages.filter((message) =>
     matchesSearch(message, searchQuery),
   );
   const hasSearch = Boolean(searchQuery.trim());
+
+  // Group by day: chat rows are messages, gallery and file rows attachments.
+  const groups: { day: number; items: ReactNode[] }[] = [];
+  for (const message of filtered) {
+    const items: ReactNode[] = [];
+    if (view.kind === "chat") {
+      items.push(
+        <MessageBubble
+          key={message._id}
+          message={message}
+          isSelectionMode={isSelectionMode}
+          isSelected={selectedMessageIds.has(message._id)}
+          allLabels={allLabels}
+          onStartSelection={onStartSelection}
+          onToggleSelect={onToggleSelect}
+          onRequestDelete={onRequestDelete}
+          onSetLabel={onSetLabel}
+          onSelectLabel={onSelectLabel}
+        />,
+      );
+    } else {
+      message.attachments.forEach((attachment, index) => {
+        if (!view.matches(attachment)) return;
+        const props: ViewItemProps = {
+          message,
+          attachment,
+          isSelectionMode,
+          isSelected: selectedMessageIds.has(message._id),
+          onToggleSelect,
+        };
+        const key = `${message._id}-${attachment.storageId ?? index}`;
+        items.push(
+          view.kind === "grid" ? (
+            <GridTile key={key} {...props} />
+          ) : (
+            <FileRow key={key} {...props} onSelectLabel={onSelectLabel} />
+          ),
+        );
+      });
+    }
+    if (items.length === 0) continue;
+    const last = groups.at(-1);
+    if (last && isSameDate(last.day, message._creationTime)) {
+      last.items.push(...items);
+    } else {
+      groups.push({ day: message._creationTime, items });
+    }
+  }
 
   return (
     <div
@@ -79,7 +269,7 @@ export function MessageList({
       aria-label="Saved messages"
       aria-live="polite"
     >
-      <div className="message-column">
+      <div className={`message-column message-column--${view.kind}`}>
         {paginationStatus === "CanLoadMore" ||
         paginationStatus === "LoadingMore" ? (
           <button
@@ -94,32 +284,23 @@ export function MessageList({
           </button>
         ) : null}
         {isLoading && messages.length === 0 ? <LoadingMessages /> : null}
-        {!isLoading && filtered.length === 0 ? (
-          <EmptyMessages hasSearch={hasSearch} />
+        {!isLoading && groups.length === 0 ? (
+          <EmptyMessages hasSearch={hasSearch} emptyState={emptyState} />
         ) : null}
-        {filtered.map((message, index) => {
-          const previous = filtered[index - 1];
-          const showDate =
-            !previous ||
-            !isSameDate(previous._creationTime, message._creationTime);
-          return (
-            <div key={message._id} className="message-group">
-              {showDate ? (
-                <h3 className="date-divider">
-                  {formatDate(message._creationTime)}
-                </h3>
-              ) : null}
-              <MessageBubble
-                message={message}
-                isSelectionMode={isSelectionMode}
-                isSelected={selectedMessageIds.has(message._id)}
-                onStartSelection={onStartSelection}
-                onToggleSelect={onToggleSelect}
-                onRequestDelete={onRequestDelete}
-              />
-            </div>
-          );
-        })}
+        {groups.map((group) => (
+          <section key={group.day} className="message-group">
+            <h3 className="date-divider">{formatDate(group.day)}</h3>
+            {view.kind === "chat" ? (
+              group.items
+            ) : (
+              <div
+                className={view.kind === "grid" ? "media-grid" : "file-list"}
+              >
+                {group.items}
+              </div>
+            )}
+          </section>
+        ))}
         <div className="message-bottom-anchor" aria-hidden="true" />
       </div>
     </div>

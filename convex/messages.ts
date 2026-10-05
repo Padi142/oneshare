@@ -5,9 +5,15 @@ import {
 import { v } from "convex/values";
 
 import { mutation, query } from "./_generated/server.js";
-import type { MutationCtx } from "./_generated/server.js";
-import type { Id } from "./_generated/dataModel.js";
+import type { MutationCtx, QueryCtx } from "./_generated/server.js";
+import type { Doc, Id } from "./_generated/dataModel.js";
 import { requireUserId } from "./lib/authorization.js";
+import {
+  deleteMessageFacets,
+  indexMessage,
+  labelNameFromFacet,
+  messageFacetRows,
+} from "./lib/facetStore.js";
 
 const MAX_TEXT_LENGTH = 20_000;
 const MAX_ATTACHMENTS_PER_MESSAGE = 10;
@@ -46,12 +52,18 @@ const attachmentValidator = v.object({
   url: v.union(v.string(), v.null()),
 });
 
+const messageLabelValidator = v.object({
+  name: v.string(),
+  source: v.union(v.literal("system"), v.literal("user"), v.literal("ai")),
+});
+
 const messageValidator = v.object({
   _id: v.id("messages"),
   _creationTime: v.number(),
   userId: v.id("users"),
   text: v.optional(v.string()),
   attachments: v.array(attachmentValidator),
+  labels: v.array(messageLabelValidator),
 });
 
 const emptyAttachmentsValidator = v.optional(v.array(attachmentInputValidator));
@@ -212,54 +224,89 @@ async function prepareAttachment(
   };
 }
 
-/** Return the active account's messages newest first for realtime pagination. */
+async function withDetails(ctx: QueryCtx, message: Doc<"messages">) {
+  const [attachments, facets] = await Promise.all([
+    ctx.db
+      .query("messageAttachments")
+      .withIndex("by_message", (q) => q.eq("messageId", message._id))
+      .order("asc")
+      .collect(),
+    messageFacetRows(ctx, message._id),
+  ]);
+
+  return {
+    ...message,
+    attachments: await Promise.all(
+      attachments.map(async (attachment) => ({
+        storageId: attachment.storageId,
+        kind: attachment.kind,
+        fileName: attachment.fileName,
+        mimeType: attachment.mimeType,
+        sizeBytes: attachment.sizeBytes,
+        ...(attachment.width !== undefined ? { width: attachment.width } : {}),
+        ...(attachment.height !== undefined
+          ? { height: attachment.height }
+          : {}),
+        ...(attachment.durationMs !== undefined
+          ? { durationMs: attachment.durationMs }
+          : {}),
+        url: await ctx.storage.getUrl(attachment.storageId),
+      })),
+    ),
+    labels: facets
+      .flatMap((facet) => {
+        const name = labelNameFromFacet(facet.facet);
+        return name === undefined ? [] : [{ name, source: facet.source }];
+      })
+      .sort((left, right) => left.name.localeCompare(right.name)),
+  };
+}
+
+/**
+ * Return the active account's messages newest first for realtime pagination,
+ * optionally only those carrying one facet ("type:pdf", "label:todo").
+ */
 export const listMessages = query({
   args: {
     paginationOpts: paginationOptsValidator,
+    facet: v.optional(v.string()),
   },
   returns: paginationResultValidator(messageValidator),
   handler: async (ctx, args) => {
     const userId = await requireUserId(ctx);
+    const facet = args.facet;
+
+    if (facet === undefined) {
+      const page = await ctx.db
+        .query("messages")
+        .withIndex("by_user", (q) => q.eq("userId", userId))
+        .order("desc")
+        .paginate(args.paginationOpts);
+      return {
+        ...page,
+        page: await Promise.all(
+          page.page.map((message) => withDetails(ctx, message)),
+        ),
+      };
+    }
+
     const page = await ctx.db
-      .query("messages")
-      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .query("messageFacets")
+      .withIndex("by_user_facet_time", (q) =>
+        q.eq("userId", userId).eq("facet", facet),
+      )
       .order("desc")
       .paginate(args.paginationOpts);
-
     const messages = await Promise.all(
-      page.page.map(async (message) => {
-        const attachments = await ctx.db
-          .query("messageAttachments")
-          .withIndex("by_message", (q) => q.eq("messageId", message._id))
-          .order("asc")
-          .collect();
-
-        return {
-          ...message,
-          attachments: await Promise.all(
-            attachments.map(async (attachment) => ({
-              storageId: attachment.storageId,
-              kind: attachment.kind,
-              fileName: attachment.fileName,
-              mimeType: attachment.mimeType,
-              sizeBytes: attachment.sizeBytes,
-              ...(attachment.width !== undefined
-                ? { width: attachment.width }
-                : {}),
-              ...(attachment.height !== undefined
-                ? { height: attachment.height }
-                : {}),
-              ...(attachment.durationMs !== undefined
-                ? { durationMs: attachment.durationMs }
-                : {}),
-              url: await ctx.storage.getUrl(attachment.storageId),
-            })),
-          ),
-        };
+      page.page.map(async (row) => {
+        const message = await ctx.db.get(row.messageId);
+        return message === null ? null : await withDetails(ctx, message);
       }),
     );
-
-    return { ...page, page: messages };
+    return {
+      ...page,
+      page: messages.filter((message) => message !== null),
+    };
   },
 });
 
@@ -282,6 +329,7 @@ export const sendMessage = mutation({
   args: {
     text: v.optional(v.string()),
     attachments: emptyAttachmentsValidator,
+    labels: v.optional(v.array(v.string())),
   },
   returns: v.id("messages"),
   handler: async (ctx, args) => {
@@ -334,6 +382,11 @@ export const sendMessage = mutation({
       });
     }
 
+    const message = await ctx.db.get(messageId);
+    if (message !== null) {
+      await indexMessage(ctx, message, preparedAttachments, args.labels);
+    }
+
     return messageId;
   },
 });
@@ -362,6 +415,7 @@ export const deleteMessage = mutation({
       await ctx.db.delete(attachment._id);
     }
 
+    await deleteMessageFacets(ctx, message);
     await ctx.db.delete(args.messageId);
     return null;
   },

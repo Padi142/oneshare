@@ -52,6 +52,7 @@ type ParsedArguments =
       command: "upload";
       files: string[];
       message: string | undefined;
+      labels: string[];
       json: boolean;
       convexUrl: string | undefined;
     };
@@ -66,7 +67,7 @@ const createUploadUrl = makeFunctionReference<"mutation", Record<string, never>,
 );
 const sendMessage = makeFunctionReference<
   "mutation",
-  { text?: string; attachments?: Attachment[] },
+  { text?: string; attachments?: Attachment[]; labels?: string[] },
   string
 >("messages:sendMessage");
 
@@ -76,7 +77,8 @@ function usage(): string {
 Upload files to the signed-in OneShare account as one message.
 
 Options:
-  --message <text>       Attach a text message
+  --message <text>       Attach a text message (#tags in it become labels)
+  --label <name>         Label the message; repeat for several labels
   --json                 Print a machine-readable result
   --convex-url <url>     Override the OneShare Convex URL
   login                  Sign in and save a CLI session
@@ -125,6 +127,7 @@ function parseArguments(argv: string[]): ParsedArguments {
   }
   const files: string[] = [];
   let message: string | undefined;
+  const labels: string[] = [];
   let json = false;
   let convexUrl: string | undefined;
 
@@ -139,11 +142,12 @@ function parseArguments(argv: string[]): ParsedArguments {
       json = true;
       continue;
     }
-    if (argument === "--message" || argument === "--convex-url") {
+    if (argument === "--message" || argument === "--label" || argument === "--convex-url") {
       const value = argv[index + 1];
       if (value === undefined || value.startsWith("--")) fail(`${argument} requires a value.`);
       index += 1;
       if (argument === "--message") message = value;
+      else if (argument === "--label") labels.push(value);
       else convexUrl = value;
       continue;
     }
@@ -151,7 +155,7 @@ function parseArguments(argv: string[]): ParsedArguments {
     files.push(argument);
   }
   if (files.length === 0) return { command: "help" as const };
-  return { command: "upload" as const, files, message, json, convexUrl };
+  return { command: "upload" as const, files, message, labels, json, convexUrl };
 }
 
 function readSession(): Session | undefined {
@@ -376,6 +380,7 @@ async function main(): Promise<void> {
   const messageId = await client.mutation(sendMessage, {
     ...(parsed.message?.trim() ? { text: parsed.message.trim() } : {}),
     attachments,
+    ...(parsed.labels.length > 0 ? { labels: parsed.labels } : {}),
   });
   const result = { messageId, files: attachments.map(({ fileName, storageId }) => ({ fileName, storageId })) };
   process.stdout.write(parsed.json ? `${JSON.stringify(result)}\n` : `Uploaded ${attachments.length} file${attachments.length === 1 ? "" : "s"} (${messageId}).\n`);

@@ -3,13 +3,20 @@ import {
   CheckIcon,
   ClipboardIcon,
   DownloadIcon,
-  FileIcon,
   ImageIcon,
   LoaderIcon,
   SelectIcon,
+  TagIcon,
   TrashIcon,
   VideoIcon,
 } from "../lib/icons";
+import {
+  fileIconFor,
+  HASHTAG_PATTERN,
+  hashtagsIn,
+  labelHue,
+  normalizeLabel,
+} from "../lib/facets";
 import {
   formatBytes,
   formatDuration,
@@ -19,14 +26,19 @@ import {
 import { downloadFiles } from "../lib/download";
 import type { MessageAttachment } from "../types";
 import type { LocalMessage } from "../hooks/useChat";
+import { LabelPicker } from "./LabelPicker";
+import { LabelPills } from "./LabelPills";
 
 interface MessageBubbleProps {
   message: LocalMessage;
   isSelectionMode: boolean;
   isSelected: boolean;
+  allLabels: string[];
   onStartSelection: (messageId: string) => void;
   onToggleSelect: (messageId: string) => void;
   onRequestDelete: (message: LocalMessage) => void;
+  onSetLabel: (messageIds: string[], name: string, applied: boolean) => void;
+  onSelectLabel: (name: string) => void;
 }
 
 async function clipboardImageBlob(blob: Blob): Promise<Blob> {
@@ -136,7 +148,7 @@ function ImagePreview({ attachment }: { attachment: MessageAttachment }) {
   );
 }
 
-function AttachmentDownloadButton({
+export function AttachmentDownloadButton({
   attachment,
   className = "media-download",
 }: {
@@ -223,7 +235,11 @@ function VideoPreview({ attachment }: { attachment: MessageAttachment }) {
   );
 }
 
-function AttachmentVisual({ attachment }: { attachment: MessageAttachment }) {
+export function AttachmentVisual({
+  attachment,
+}: {
+  attachment: MessageAttachment;
+}) {
   if (
     (attachment.kind === "image" || attachment.kind === "video") &&
     attachment.url
@@ -234,6 +250,8 @@ function AttachmentVisual({ attachment }: { attachment: MessageAttachment }) {
     return <VideoPreview attachment={attachment} />;
   }
 
+  const FileTypeIcon = fileIconFor(attachment);
+
   return (
     <div className="file-card">
       <span className="file-icon">
@@ -242,7 +260,7 @@ function AttachmentVisual({ attachment }: { attachment: MessageAttachment }) {
         ) : attachment.kind === "video" ? (
           <VideoIcon size={20} />
         ) : (
-          <FileIcon size={20} />
+          <FileTypeIcon size={20} />
         )}
       </span>
       <span className="file-card-copy">
@@ -265,13 +283,49 @@ function AttachmentVisual({ attachment }: { attachment: MessageAttachment }) {
 const URL_PATTERN = /(https?:\/\/[^\s<>"']+)/g;
 const TRAILING_PUNCTUATION = /[.,!?;:)\]}]+$/;
 
-/** Renders message text with bare http(s) URLs turned into links. */
-function MessageText({ text }: { text: string }) {
+function withHashtags(
+  text: string,
+  key: number,
+  onSelectLabel: (name: string) => void,
+): React.ReactNode[] {
+  const nodes: React.ReactNode[] = [];
+  let cursor = 0;
+  for (const match of text.matchAll(HASHTAG_PATTERN)) {
+    const name = normalizeLabel(match[2]);
+    if (name === undefined) continue;
+    const start = match.index + match[1].length;
+    nodes.push(text.slice(cursor, start));
+    nodes.push(
+      <button
+        key={`${key}-${start}`}
+        type="button"
+        className="hashtag"
+        style={{ "--label-hue": labelHue(name) } as React.CSSProperties}
+        onClick={() => onSelectLabel(name)}
+        title={`Show all #${name}`}
+      >
+        #{match[2]}
+      </button>,
+    );
+    cursor = start + match[2].length + 1;
+  }
+  nodes.push(text.slice(cursor));
+  return nodes;
+}
+
+/** Renders message text with bare http(s) URLs and #labels made clickable. */
+function MessageText({
+  text,
+  onSelectLabel,
+}: {
+  text: string;
+  onSelectLabel: (name: string) => void;
+}) {
   const parts = text.split(URL_PATTERN);
   return (
     <p className="message-text">
       {parts.map((part, index) => {
-        if (index % 2 === 0) return part;
+        if (index % 2 === 0) return withHashtags(part, index, onSelectLabel);
         const trailing = part.match(TRAILING_PUNCTUATION)?.[0] ?? "";
         const url = trailing ? part.slice(0, -trailing.length) : part;
         return (
@@ -295,14 +349,25 @@ export function MessageBubble({
   message,
   isSelectionMode,
   isSelected,
+  allLabels,
   onStartSelection,
   onToggleSelect,
   onRequestDelete,
+  onSetLabel,
+  onSelectLabel,
 }: MessageBubbleProps) {
   const [copied, setCopied] = useState(false);
   const [isActive, setIsActive] = useState(false);
+  const [isLabelPickerOpen, setIsLabelPickerOpen] = useState(false);
   const rowRef = useRef<HTMLElement>(null);
+  const labelButtonRef = useRef<HTMLButtonElement>(null);
   const text = messageText(message);
+  const labels = message.labels ?? [];
+  const labelNames = new Set(labels.map((label) => label.name));
+  // Hashtags are already visible and clickable in the text itself.
+  const typedLabels = new Set(hashtagsIn(text));
+  const extraLabels = labels.filter((label) => !typedLabels.has(label.name));
+  const pickerLabels = [...new Set([...allLabels, ...labelNames])].sort();
   const attachments = message.attachments;
   const hasMedia = attachments.some(
     (attachment) =>
@@ -381,6 +446,19 @@ export function MessageBubble({
                 {copied ? <CheckIcon size={16} /> : <ClipboardIcon size={16} />}
               </button>
             ) : null}
+            {message.localStatus === undefined ? (
+              <button
+                ref={labelButtonRef}
+                type="button"
+                className="icon-button"
+                onClick={() => setIsLabelPickerOpen((open) => !open)}
+                aria-label="Labels"
+                aria-expanded={isLabelPickerOpen}
+                title="Labels"
+              >
+                <TagIcon size={16} />
+              </button>
+            ) : null}
             <button
               type="button"
               className="icon-button"
@@ -411,8 +489,11 @@ export function MessageBubble({
               attachment={attachment}
             />
           ))}
-          {text ? <MessageText text={text} /> : null}
+          {text ? (
+            <MessageText text={text} onSelectLabel={onSelectLabel} />
+          ) : null}
           <footer className="message-meta">
+            <LabelPills labels={extraLabels} onSelect={onSelectLabel} />
             {message.localStatus === "sending" ? (
               <span>Sending…</span>
             ) : message.localStatus === "failed" ? (
@@ -425,6 +506,15 @@ export function MessageBubble({
           </footer>
         </div>
       </div>
+      {isLabelPickerOpen ? (
+        <LabelPicker
+          anchorRef={labelButtonRef}
+          labels={pickerLabels}
+          stateOf={(name) => (labelNames.has(name) ? "all" : "none")}
+          onToggle={(name, applied) => onSetLabel([message._id], name, applied)}
+          onClose={() => setIsLabelPickerOpen(false)}
+        />
+      ) : null}
     </article>
   );
 }

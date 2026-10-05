@@ -3,11 +3,13 @@ import {
   DownloadIcon,
   SearchIcon,
   SelectIcon,
+  TagIcon,
   TrashIcon,
   UserIcon,
   XIcon,
 } from "../lib/icons";
 import { BrandMark } from "./BrandMark";
+import { LabelPicker, type LabelState } from "./LabelPicker";
 
 interface ChatHeaderProps {
   isSelectionMode: boolean;
@@ -15,6 +17,9 @@ interface ChatHeaderProps {
   selectedAttachmentCount: number;
   isDownloading: boolean;
   searchQuery: string;
+  allLabels: string[];
+  selectedLabelState: (name: string) => LabelState;
+  onToggleSelectedLabel: (name: string, applied: boolean) => void;
   onSearchChange: (value: string) => void;
   onStartSelection: () => void;
   onCancelSelection: () => void;
@@ -29,6 +34,9 @@ export function ChatHeader({
   selectedAttachmentCount,
   isDownloading,
   searchQuery,
+  allLabels,
+  selectedLabelState,
+  onToggleSelectedLabel,
   onSearchChange,
   onStartSelection,
   onCancelSelection,
@@ -40,6 +48,13 @@ export function ChatHeader({
   const [isAccountOpen, setIsAccountOpen] = useState(false);
   const accountRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const labelButtonRef = useRef<HTMLButtonElement>(null);
+  const [isLabelPickerOpen, setIsLabelPickerOpen] = useState(false);
+
+  useEffect(() => {
+    if (!isSelectionMode || selectedMessageCount === 0)
+      setIsLabelPickerOpen(false);
+  }, [isSelectionMode, selectedMessageCount]);
 
   useEffect(() => {
     if (isSearchOpen) searchRef.current?.focus();
@@ -108,6 +123,26 @@ export function ChatHeader({
             </span>
           </div>
           <div className="header-actions">
+            <button
+              ref={labelButtonRef}
+              type="button"
+              className="header-button"
+              onClick={() => setIsLabelPickerOpen((open) => !open)}
+              disabled={selectedMessageCount === 0}
+              aria-expanded={isLabelPickerOpen}
+            >
+              <TagIcon size={17} />
+              <span className="header-button-label">Label</span>
+            </button>
+            {isLabelPickerOpen ? (
+              <LabelPicker
+                anchorRef={labelButtonRef}
+                labels={allLabels}
+                stateOf={selectedLabelState}
+                onToggle={onToggleSelectedLabel}
+                onClose={() => setIsLabelPickerOpen(false)}
+              />
+            ) : null}
             <button
               type="button"
               className="header-button"
