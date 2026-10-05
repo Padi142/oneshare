@@ -10,7 +10,12 @@ import type { LabelState } from "./LabelPicker";
 import { MessageList } from "./MessageList";
 import { ArrowDownIcon, XIcon } from "../lib/icons";
 import { useChat, type LocalMessage } from "../hooks/useChat";
-import { downloadFiles, type DownloadFile } from "../lib/download";
+import {
+  attachmentFile,
+  downloadFiles,
+  downloadsLocation,
+  type DownloadFile,
+} from "../lib/download";
 import {
   facetForFilter,
   TYPE_FILTERS,
@@ -109,17 +114,10 @@ export function OneShareApp() {
   const selectedDownloadFiles = useMemo<DownloadFile[]>(
     () =>
       selectedMessages.flatMap((message) =>
-        message.attachments.flatMap((attachment) =>
-          attachment.url
-            ? [
-                {
-                  fileName: attachment.fileName,
-                  mimeType: attachment.mimeType,
-                  url: attachment.url,
-                },
-              ]
-            : [],
-        ),
+        message.attachments.flatMap((attachment) => {
+          const file = attachmentFile(attachment);
+          return file ? [file] : [];
+        }),
       ),
     [selectedMessages],
   );
@@ -286,11 +284,7 @@ export function OneShareApp() {
       const result = await downloadFiles(selectedDownloadFiles);
       if (result.saved > 0) {
         setDownloadNotice(
-          result.destination === "downloads"
-            ? `Saved ${result.saved} file${result.saved === 1 ? "" : "s"} to Downloads.`
-            : result.destination === "queued"
-              ? `Started ${result.saved} download${result.saved === 1 ? "" : "s"} in Downloads.`
-              : `Started ${result.saved} download${result.saved === 1 ? "" : "s"}.`,
+          `Saved ${result.saved} file${result.saved === 1 ? "" : "s"} to ${downloadsLocation}.`,
         );
       }
       if (result.failed.length > 0) {

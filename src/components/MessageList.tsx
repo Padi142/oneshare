@@ -4,18 +4,20 @@ import { LabelPills } from "./LabelPills";
 import {
   AttachmentDownloadButton,
   AttachmentVisual,
+  FileStatusIcon,
+  fileDetail,
   MessageBubble,
 } from "./MessageBubble";
 import { CheckIcon } from "../lib/icons";
-import { fileIconFor, type MessageView } from "../lib/facets";
+import type { MessageView } from "../lib/facets";
 import {
-  formatBytes,
   formatDate,
   formatTime,
   isSameDate,
   matchesSearch,
 } from "../lib/utils";
 import type { LocalMessage } from "../hooks/useChat";
+import { useLocalFile } from "../hooks/useLocalFile";
 import type { MessageAttachment } from "../types";
 
 interface MessageListProps {
@@ -148,7 +150,7 @@ function FileRow({
   onToggleSelect,
   onSelectLabel,
 }: ViewItemProps & { onSelectLabel: (name: string) => void }) {
-  const Icon = fileIconFor(attachment);
+  const localFile = useLocalFile(attachment);
   return (
     <div
       className={[
@@ -166,22 +168,29 @@ function FileRow({
           onToggleSelect={onToggleSelect}
         />
       ) : null}
-      <span className="file-icon">
-        <Icon size={20} />
-      </span>
-      <span className="file-row-copy">
-        <strong title={attachment.fileName}>{attachment.fileName}</strong>
-        <small>
-          {formatBytes(attachment.sizeBytes)} ·{" "}
-          {formatTime(message._creationTime)}
-          {message.text ? (
-            <span title={message.text}> · {message.text}</span>
-          ) : null}
-        </small>
-      </span>
+      <button
+        type="button"
+        className="file-row-open"
+        onClick={localFile.open}
+        disabled={!localFile.file}
+        title={`Open ${attachment.fileName}`}
+      >
+        <FileStatusIcon attachment={attachment} state={localFile.state} />
+        <span className="file-row-copy">
+          <strong title={attachment.fileName}>{attachment.fileName}</strong>
+          <small className={localFile.error ? "file-detail-error" : undefined}>
+            {fileDetail(attachment, localFile)} ·{" "}
+            {formatTime(message._creationTime)}
+            {message.text ? (
+              <span title={message.text}> · {message.text}</span>
+            ) : null}
+          </small>
+        </span>
+      </button>
       <LabelPills labels={message.labels ?? []} onSelect={onSelectLabel} />
       <AttachmentDownloadButton
-        attachment={attachment}
+        localFile={localFile}
+        fileName={attachment.fileName}
         className="file-download"
       />
     </div>

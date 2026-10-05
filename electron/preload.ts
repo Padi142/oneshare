@@ -3,6 +3,8 @@ import { contextBridge, ipcRenderer } from "electron";
 import type {
   DesktopBridge,
   DesktopDownloadFile,
+  DesktopDownloadProgress,
+  DesktopDownloadResult,
   DesktopFile,
   DesktopMenuAction,
   DesktopPlatform,
@@ -11,7 +13,11 @@ import type {
 const APP_VERSION_CHANNEL = "app:get-version";
 const OPEN_EXTERNAL_CHANNEL = "shell:open-external";
 const READ_FILE_FROM_PATH_CHANNEL = "file:read-from-path";
-const DOWNLOAD_FILES_CHANNEL = "file:download-files";
+const DOWNLOADED_FILES_CHANNEL = "file:downloaded-files";
+const DOWNLOAD_FILE_CHANNEL = "file:download";
+const DOWNLOAD_PROGRESS_CHANNEL = "file:download-progress";
+const OPEN_DOWNLOADED_FILE_CHANNEL = "file:open-downloaded";
+const SHOW_DOWNLOADED_FILE_CHANNEL = "file:show-downloaded";
 const MENU_ACTION_CHANNEL = "menu:action";
 
 const MENU_ACTIONS = new Set<DesktopMenuAction>([
@@ -29,8 +35,28 @@ const bridge: DesktopBridge = Object.freeze({
       READ_FILE_FROM_PATH_CHANNEL,
       path,
     ) as Promise<DesktopFile>,
-  downloadFiles: (files: DesktopDownloadFile[]) =>
-    ipcRenderer.invoke(DOWNLOAD_FILES_CHANNEL, files),
+  getDownloadedFiles: (keys: string[]) =>
+    ipcRenderer.invoke(DOWNLOADED_FILES_CHANNEL, keys) as Promise<string[]>,
+  downloadFile: (file: DesktopDownloadFile) =>
+    ipcRenderer.invoke(
+      DOWNLOAD_FILE_CHANNEL,
+      file,
+    ) as Promise<DesktopDownloadResult>,
+  openDownloadedFile: (key: string) =>
+    ipcRenderer.invoke(OPEN_DOWNLOADED_FILE_CHANNEL, key) as Promise<void>,
+  showDownloadedFile: (key: string) =>
+    ipcRenderer.invoke(SHOW_DOWNLOADED_FILE_CHANNEL, key) as Promise<void>,
+  onDownloadProgress: (
+    listener: (progress: DesktopDownloadProgress) => void,
+  ) => {
+    const wrappedListener = (
+      _event: Electron.IpcRendererEvent,
+      value: DesktopDownloadProgress,
+    ) => listener(value);
+    ipcRenderer.on(DOWNLOAD_PROGRESS_CHANNEL, wrappedListener);
+    return () =>
+      ipcRenderer.removeListener(DOWNLOAD_PROGRESS_CHANNEL, wrappedListener);
+  },
   onMenuAction: (listener: (action: DesktopMenuAction) => void) => {
     const wrappedListener = (
       _event: Electron.IpcRendererEvent,

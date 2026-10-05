@@ -731,6 +731,18 @@ a {
 .file-row--selected:hover {
   background: var(--accent-soft);
 }
+.file-row-open {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  padding: 0;
+  align-items: center;
+  gap: 12px;
+  border: 0;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
 .file-row-copy {
   display: grid;
   min-width: 0;
@@ -1019,7 +1031,24 @@ a {
   align-items: center;
   gap: 10px;
 }
+.file-card-open {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  padding: 0;
+  align-items: center;
+  gap: 10px;
+  border: 0;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+.file-card-open:disabled,
+.file-row-open:disabled {
+  cursor: default;
+}
 .file-icon {
+  position: relative;
   display: grid;
   width: 40px;
   height: 40px;
@@ -1028,6 +1057,39 @@ a {
   border-radius: 10px;
   color: var(--accent);
   background: var(--bg);
+}
+.file-icon-badge {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  display: grid;
+  width: 16px;
+  height: 16px;
+  place-items: center;
+  border: 2px solid var(--surface);
+  border-radius: 50%;
+  color: #fff;
+  background: var(--accent);
+}
+.file-row .file-icon-badge {
+  border-color: var(--bg);
+}
+.file-card-copy .file-detail-error,
+.file-row-copy .file-detail-error {
+  color: var(--danger);
+}
+.progress-ring circle {
+  fill: none;
+  stroke-width: 2.6;
+}
+.progress-ring-track {
+  stroke: currentColor;
+  opacity: 0.2;
+}
+.progress-ring-value {
+  stroke: currentColor;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 150ms linear;
 }
 .file-card-copy {
   display: grid;

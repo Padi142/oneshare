@@ -26,7 +26,7 @@ Moving a file from a phone to a laptop usually means emailing yourself, messagin
 - **Drop, paste or pick.** Drag files anywhere onto the window, paste images from the clipboard, or (on desktop) paste a file path to attach the file it points to.
 - **Bulk actions.** Select several messages to download all their files at once or delete them everywhere.
 - **Search.** Filter by message text or file name with <kbd>Ctrl</kbd>/<kbd>Cmd</kbd> + <kbd>K</kbd>.
-- **Native downloads.** Desktop saves straight into `~/Downloads` without a dialog and never overwrites existing files. Android uses a small native Capacitor plugin to write into the system Downloads folder.
+- **Telegram-style files.** Tap a file to open it in the app that handles it, downloading it first if needed. Desktop saves into `~/Downloads/OneShare` without a dialog and never overwrites existing files. Android and iOS keep files in OneShare's own storage with no system download UI. Android opens them with the matching app and installs APKs directly, and iOS previews them in Quick Look.
 - **CLI for scripts and agents.** `oneshare report.pdf --message "Q3 numbers"` uploads from a terminal, reusing the desktop app's session.
 - **Light and dark mode** that follow the system setting, and layouts that adapt from a 320 px phone to a desktop window. Touch devices reveal message actions with a tap; pointer devices on hover.
 
@@ -51,7 +51,7 @@ Moving a file from a phone to a laptop usually means emailing yourself, messagin
 | ------- | ------------------------------------------------------------------------------------------ |
 | UI      | React 19, TypeScript, plain CSS with design tokens, no UI framework                        |
 | Desktop | Electron with context isolation, sandboxed renderer, strict CSP and a typed preload bridge |
-| Mobile  | Capacitor 8 with a custom Java plugin for Android downloads                                |
+| Mobile  | Capacitor 8 with small native file plugins (Java on Android, Swift on iOS)                 |
 | Backend | Convex: reactive queries, mutations, file storage and auth in one TypeScript codebase      |
 | CLI     | Single-file Node script bundled with esbuild                                               |
 | Tooling | Bun, Vite 8, TypeScript, Prettier, electron-builder                                        |

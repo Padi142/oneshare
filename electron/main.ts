@@ -6,7 +6,11 @@ import {
   nativeTheme,
   shell,
 } from "electron";
-import type { MenuItemConstructorOptions, Rectangle } from "electron";
+import type {
+  MenuItemConstructorOptions,
+  Rectangle,
+  WebContents,
+} from "electron";
 import {
   createWriteStream,
   existsSync,
@@ -15,7 +19,7 @@ import {
 } from "node:fs";
 import { mkdir, readFile, rename, stat, unlink } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
-import { Readable } from "node:stream";
+import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { basename, extname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -30,12 +34,17 @@ import type {
 const APP_VERSION_CHANNEL = "app:get-version";
 const OPEN_EXTERNAL_CHANNEL = "shell:open-external";
 const READ_FILE_FROM_PATH_CHANNEL = "file:read-from-path";
-const DOWNLOAD_FILES_CHANNEL = "file:download-files";
+const DOWNLOADED_FILES_CHANNEL = "file:downloaded-files";
+const DOWNLOAD_FILE_CHANNEL = "file:download";
+const DOWNLOAD_PROGRESS_CHANNEL = "file:download-progress";
+const OPEN_DOWNLOADED_FILE_CHANNEL = "file:open-downloaded";
+const SHOW_DOWNLOADED_FILE_CHANNEL = "file:show-downloaded";
+/** Matched by the renderer to re-download files the user deleted. */
+const NOT_DOWNLOADED_ERROR = "NOT_DOWNLOADED";
 const MENU_ACTION_CHANNEL = "menu:action";
 
 const APP_NAME = "OneShare";
 const MAX_UPLOAD_BYTES = 500 * 1024 * 1024;
-const MAX_DOWNLOAD_FILES = 100;
 const DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL?.trim();
 const MIN_WINDOW_WIDTH = 720;
 const MIN_WINDOW_HEIGHT = 520;
@@ -239,10 +248,18 @@ async function readFileFromPath(value: unknown): Promise<DesktopFile> {
   }
 }
 
+const DOWNLOAD_KEY_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
+const DOWNLOAD_PROGRESS_INTERVAL_MS = 150;
+
+function isDownloadKey(value: unknown): value is string {
+  return typeof value === "string" && DOWNLOAD_KEY_PATTERN.test(value);
+}
+
 function isDownloadFile(value: unknown): value is DesktopDownloadFile {
   if (typeof value !== "object" || value === null) return false;
   const candidate = value as Record<string, unknown>;
   return (
+    isDownloadKey(candidate.key) &&
     typeof candidate.fileName === "string" &&
     candidate.fileName.trim().length > 0 &&
     candidate.fileName.length <= 255 &&
@@ -257,19 +274,6 @@ function isDownloadUrl(value: string): boolean {
   } catch {
     return false;
   }
-}
-
-function parseDownloadFiles(value: unknown): DesktopDownloadFile[] {
-  if (
-    !Array.isArray(value) ||
-    value.length === 0 ||
-    value.length > MAX_DOWNLOAD_FILES ||
-    !value.every(isDownloadFile)
-  ) {
-    throw new Error("Those files could not be downloaded.");
-  }
-
-  return value;
 }
 
 function safeDownloadFileName(value: string): string {
@@ -298,11 +302,78 @@ function nextAvailableDownloadPath(downloadsPath: string, fileName: string) {
   }
 }
 
-async function downloadOneFile(
-  file: DesktopDownloadFile,
-  downloadsPath: string,
-): Promise<string> {
-  const response = await fetch(file.url);
+/** Downloads land in ~/Downloads/OneShare, like Telegram's Downloads/Telegram. */
+function downloadsFolder(): string {
+  return join(app.getPath("downloads"), APP_NAME);
+}
+
+function downloadIndexPath(): string {
+  return join(app.getPath("userData"), "downloads.json");
+}
+
+/** Maps attachment keys to the absolute path each one was saved to. */
+function readDownloadIndex(): Record<string, string> {
+  try {
+    const parsed: unknown = JSON.parse(
+      readFileSync(downloadIndexPath(), "utf8"),
+    );
+    if (typeof parsed !== "object" || parsed === null) return {};
+    return Object.fromEntries(
+      Object.entries(parsed).filter(
+        (entry): entry is [string, string] =>
+          isDownloadKey(entry[0]) &&
+          typeof entry[1] === "string" &&
+          isAbsolute(entry[1]),
+      ),
+    );
+  } catch {
+    return {};
+  }
+}
+
+function writeDownloadIndex(index: Record<string, string>): void {
+  writeFileSync(downloadIndexPath(), JSON.stringify(index), "utf8");
+}
+
+/** The saved path for a key, or undefined once the user moved or deleted it. */
+function downloadedPath(key: unknown): string | undefined {
+  if (!isDownloadKey(key)) return undefined;
+  const path = readDownloadIndex()[key];
+  return path && existsSync(path) ? path : undefined;
+}
+
+function downloadedKeys(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const index = readDownloadIndex();
+  return value.filter(
+    (key): key is string =>
+      isDownloadKey(key) && index[key] !== undefined && existsSync(index[key]),
+  );
+}
+
+function sendDownloadProgress(
+  sender: WebContents,
+  key: string,
+  received: number,
+  total: number,
+): void {
+  if (!sender.isDestroyed()) {
+    sender.send(DOWNLOAD_PROGRESS_CHANNEL, { key, received, total });
+  }
+}
+
+async function downloadFile(
+  sender: WebContents,
+  value: unknown,
+): Promise<DesktopDownloadResult> {
+  if (!isDownloadFile(value)) {
+    throw new Error("That file could not be downloaded.");
+  }
+
+  const existing = downloadedPath(value.key);
+  if (existing) return { fileName: basename(existing) };
+
+  const response = await fetch(value.url);
   if (!response.ok) {
     throw new Error(`Download failed (${response.status}).`);
   }
@@ -311,14 +382,33 @@ async function downloadOneFile(
   if (Number.isFinite(contentLength) && contentLength > MAX_UPLOAD_BYTES) {
     throw new Error("The file is larger than 500 MB.");
   }
+  const total = Number.isFinite(contentLength) ? contentLength : -1;
 
   if (!response.body) {
     throw new Error("The download had no file contents.");
   }
 
-  const fileName = safeDownloadFileName(file.fileName);
-  const destination = nextAvailableDownloadPath(downloadsPath, fileName);
-  const temporaryPath = join(downloadsPath, `.oneshare-${randomUUID()}.tmp`);
+  const folder = downloadsFolder();
+  await mkdir(folder, { recursive: true });
+  const temporaryPath = join(folder, `.oneshare-${randomUUID()}.tmp`);
+
+  let received = 0;
+  let lastProgressAt = 0;
+  const countProgress = new Transform({
+    transform(chunk: Buffer, _encoding, callback) {
+      received += chunk.length;
+      if (received > MAX_UPLOAD_BYTES) {
+        callback(new Error("The file is larger than 500 MB."));
+        return;
+      }
+      const now = Date.now();
+      if (now - lastProgressAt >= DOWNLOAD_PROGRESS_INTERVAL_MS) {
+        lastProgressAt = now;
+        sendDownloadProgress(sender, value.key, received, total);
+      }
+      callback(null, chunk);
+    },
+  });
 
   try {
     const nodeResponseBody = response.body as unknown as Parameters<
@@ -326,42 +416,35 @@ async function downloadOneFile(
     >[0];
     await pipeline(
       Readable.fromWeb(nodeResponseBody),
+      countProgress,
       createWriteStream(temporaryPath, { flags: "wx" }),
     );
-    const downloadedStats = await stat(temporaryPath);
-    if (downloadedStats.size > MAX_UPLOAD_BYTES) {
-      throw new Error("The file is larger than 500 MB.");
-    }
+    sendDownloadProgress(sender, value.key, received, total);
+
+    const destination = nextAvailableDownloadPath(
+      folder,
+      safeDownloadFileName(value.fileName),
+    );
     await rename(temporaryPath, destination);
-    return basename(destination);
+    writeDownloadIndex({ ...readDownloadIndex(), [value.key]: destination });
+    return { fileName: basename(destination) };
   } catch (error) {
     await unlink(temporaryPath).catch(() => undefined);
     throw error;
   }
 }
 
-async function downloadFiles(value: unknown): Promise<DesktopDownloadResult> {
-  const files = parseDownloadFiles(value);
-  const downloadsPath = app.getPath("downloads");
-  await mkdir(downloadsPath, { recursive: true });
+async function openDownloadedFile(key: unknown): Promise<void> {
+  const path = downloadedPath(key);
+  if (!path) throw new Error(NOT_DOWNLOADED_ERROR);
+  const failure = await shell.openPath(path);
+  if (failure) throw new Error(failure);
+}
 
-  const saved: string[] = [];
-  const failed: DesktopDownloadResult["failed"] = [];
-  for (const file of files) {
-    try {
-      saved.push(await downloadOneFile(file, downloadsPath));
-    } catch (error) {
-      failed.push({
-        fileName: file.fileName,
-        reason:
-          error instanceof Error && error.message
-            ? error.message
-            : "Download failed.",
-      });
-    }
-  }
-
-  return { saved, failed };
+function showDownloadedFile(key: unknown): void {
+  const path = downloadedPath(key);
+  if (!path) throw new Error(NOT_DOWNLOADED_ERROR);
+  shell.showItemInFolder(path);
 }
 
 function isRendererUrl(url: string): boolean {
@@ -469,8 +552,17 @@ function registerIpcHandlers(): void {
   ipcMain.handle(READ_FILE_FROM_PATH_CHANNEL, (_event, value: unknown) =>
     readFileFromPath(value),
   );
-  ipcMain.handle(DOWNLOAD_FILES_CHANNEL, (_event, value: unknown) =>
-    downloadFiles(value),
+  ipcMain.handle(DOWNLOADED_FILES_CHANNEL, (_event, value: unknown) =>
+    downloadedKeys(value),
+  );
+  ipcMain.handle(DOWNLOAD_FILE_CHANNEL, (event, value: unknown) =>
+    downloadFile(event.sender, value),
+  );
+  ipcMain.handle(OPEN_DOWNLOADED_FILE_CHANNEL, (_event, value: unknown) =>
+    openDownloadedFile(value),
+  );
+  ipcMain.handle(SHOW_DOWNLOADED_FILE_CHANNEL, (_event, value: unknown) =>
+    showDownloadedFile(value),
   );
 }
 

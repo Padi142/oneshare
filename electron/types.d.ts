@@ -19,17 +19,22 @@ export interface DesktopFile {
 }
 
 export interface DesktopDownloadFile {
+  /** Stable attachment id; the same key always maps to the same saved file. */
+  key: string;
   fileName: string;
   mimeType?: string;
   url: string;
 }
 
 export interface DesktopDownloadResult {
-  saved: string[];
-  failed: Array<{
-    fileName: string;
-    reason: string;
-  }>;
+  fileName: string;
+}
+
+export interface DesktopDownloadProgress {
+  key: string;
+  received: number;
+  /** -1 when the server didn't report a size. */
+  total: number;
 }
 
 export interface DesktopBridge {
@@ -38,7 +43,15 @@ export interface DesktopBridge {
   getAppVersion(): Promise<string>;
   openExternal(url: string): Promise<boolean>;
   readFileFromPath(path: string): Promise<DesktopFile>;
-  downloadFiles(files: DesktopDownloadFile[]): Promise<DesktopDownloadResult>;
+  /** Returns the subset of keys that are still saved on disk. */
+  getDownloadedFiles(keys: string[]): Promise<string[]>;
+  /** Saves into ~/Downloads/OneShare, or resolves at once if already saved. */
+  downloadFile(file: DesktopDownloadFile): Promise<DesktopDownloadResult>;
+  openDownloadedFile(key: string): Promise<void>;
+  showDownloadedFile(key: string): Promise<void>;
+  onDownloadProgress(
+    listener: (progress: DesktopDownloadProgress) => void,
+  ): () => void;
   onMenuAction(listener: (action: DesktopMenuAction) => void): () => void;
 }
 

@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  ArrowDownIcon,
   CheckIcon,
   ClipboardIcon,
   DownloadIcon,
+  ExternalLinkIcon,
+  FolderIcon,
   ImageIcon,
   LoaderIcon,
   SelectIcon,
@@ -23,7 +26,12 @@ import {
   formatTime,
   messageText,
 } from "../lib/utils";
-import { downloadFiles } from "../lib/download";
+import {
+  canRevealFiles,
+  opensLocalFiles,
+  type LocalFileState,
+} from "../lib/download";
+import { useLocalFile, type LocalFile } from "../hooks/useLocalFile";
 import type { MessageAttachment } from "../types";
 import type { LocalMessage } from "../hooks/useChat";
 import { LabelPicker } from "./LabelPicker";
@@ -67,6 +75,7 @@ async function clipboardImageBlob(blob: Blob): Promise<Blob> {
 }
 
 function ImagePreview({ attachment }: { attachment: MessageAttachment }) {
+  const localFile = useLocalFile(attachment);
   const [copyState, setCopyState] = useState<
     "idle" | "copying" | "copied" | "error"
   >("idle");
@@ -105,10 +114,12 @@ function ImagePreview({ attachment }: { attachment: MessageAttachment }) {
     }
   }
 
+  // Native shells open the saved image in the system viewer; the web keeps
+  // the plain link to a new tab.
   function openImage(event: React.MouseEvent<HTMLAnchorElement>) {
-    if (!attachment.url || !window.desktopBridge?.isElectron) return;
+    if (!opensLocalFiles || !localFile.file) return;
     event.preventDefault();
-    void window.desktopBridge.openExternal(attachment.url);
+    localFile.open();
   }
 
   const copyMessage =
@@ -119,6 +130,8 @@ function ImagePreview({ attachment }: { attachment: MessageAttachment }) {
         : copyState === "error"
           ? "Couldn’t copy image"
           : "Right-click to copy image";
+  const statusMessage =
+    localFile.error ?? (copyState !== "idle" ? copyMessage : undefined);
 
   return (
     <div className="media-preview">
@@ -127,7 +140,7 @@ function ImagePreview({ attachment }: { attachment: MessageAttachment }) {
         href={attachment.url ?? undefined}
         target="_blank"
         rel="noreferrer"
-        aria-label={`Open ${attachment.fileName} in a browser`}
+        aria-label={`Open ${attachment.fileName}`}
         title={`${attachment.fileName} · ${copyMessage}`}
         onClick={openImage}
         onContextMenu={(event) => void copyImage(event)}
@@ -138,80 +151,104 @@ function ImagePreview({ attachment }: { attachment: MessageAttachment }) {
           loading="lazy"
         />
       </a>
-      <AttachmentDownloadButton attachment={attachment} />
-      {copyState !== "idle" ? (
+      <AttachmentDownloadButton
+        localFile={localFile}
+        fileName={attachment.fileName}
+      />
+      {statusMessage ? (
         <span className="media-copy-status" role="status" aria-live="polite">
-          {copyMessage}
+          {statusMessage}
         </span>
       ) : null}
     </div>
   );
 }
 
+function ProgressRing({
+  progress,
+  size = 16,
+}: {
+  progress?: number;
+  size?: number;
+}) {
+  if (progress === undefined)
+    return <LoaderIcon className="spin" size={size} />;
+  const radius = 9;
+  const circumference = 2 * Math.PI * radius;
+  return (
+    <svg
+      className="progress-ring"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+    >
+      <circle className="progress-ring-track" cx="12" cy="12" r={radius} />
+      <circle
+        className="progress-ring-value"
+        cx="12"
+        cy="12"
+        r={radius}
+        strokeDasharray={circumference}
+        strokeDashoffset={circumference * (1 - progress)}
+        transform="rotate(-90 12 12)"
+      />
+    </svg>
+  );
+}
+
+/** Download → progress → open (mobile) or show in folder (desktop). */
 export function AttachmentDownloadButton({
-  attachment,
+  localFile,
+  fileName,
   className = "media-download",
 }: {
-  attachment: MessageAttachment;
+  localFile: LocalFile;
+  fileName: string;
   className?: string;
 }) {
-  const [state, setState] = useState<
-    "idle" | "downloading" | "downloaded" | "error"
-  >("idle");
+  const { file, state, error } = localFile;
+  if (!file) return null;
 
-  useEffect(() => {
-    if (state === "idle" || state === "downloading") return;
-    const timeout = window.setTimeout(() => setState("idle"), 1800);
-    return () => window.clearTimeout(timeout);
-  }, [state]);
+  const isDownloading = state.status === "downloading";
+  const isSaved = state.status === "local";
+  const label = error
+    ? error
+    : isDownloading
+      ? state.progress === undefined
+        ? `Downloading ${fileName}`
+        : `Downloading ${fileName} (${Math.round(state.progress * 100)}%)`
+      : isSaved && canRevealFiles
+        ? `Show ${fileName} in folder`
+        : isSaved && opensLocalFiles
+          ? `Open ${fileName}`
+          : `Download ${fileName}`;
 
-  const url = attachment.url;
-  if (typeof url !== "string" || url.length === 0) return null;
-
-  async function handleDownload(
-    event: React.MouseEvent<HTMLButtonElement>,
-    downloadUrl: string,
-  ) {
+  function handleClick(event: React.MouseEvent<HTMLButtonElement>) {
     event.preventDefault();
     event.stopPropagation();
-    setState("downloading");
-    try {
-      const result = await downloadFiles([
-        {
-          fileName: attachment.fileName,
-          mimeType: attachment.mimeType,
-          url: downloadUrl,
-        },
-      ]);
-      const failure = result.failed[0];
-      if (failure) throw new Error(failure.reason);
-      setState("downloaded");
-    } catch {
-      setState("error");
-    }
+    if (isDownloading) return;
+    if (isSaved && canRevealFiles) localFile.reveal();
+    else if (isSaved && opensLocalFiles) localFile.open();
+    else localFile.download();
   }
-
-  const label =
-    state === "downloading"
-      ? `Downloading ${attachment.fileName}`
-      : state === "downloaded"
-        ? `${attachment.fileName} downloaded`
-        : state === "error"
-          ? `Couldn't download ${attachment.fileName}`
-          : `Download ${attachment.fileName}`;
 
   return (
     <button
       type="button"
       className={`icon-button ${className}`}
-      onClick={(event) => void handleDownload(event, url)}
-      disabled={state === "downloading"}
+      onClick={handleClick}
+      aria-busy={isDownloading}
       aria-label={label}
       title={label}
     >
-      {state === "downloading" ? (
-        <LoaderIcon className="spin" size={16} />
-      ) : state === "downloaded" ? (
+      {isDownloading ? (
+        <ProgressRing progress={state.progress} />
+      ) : isSaved && canRevealFiles ? (
+        <FolderIcon size={16} />
+      ) : isSaved && opensLocalFiles ? (
+        <ExternalLinkIcon size={16} />
+      ) : isSaved ? (
         <CheckIcon size={16} />
       ) : (
         <DownloadIcon size={16} />
@@ -220,7 +257,56 @@ export function AttachmentDownloadButton({
   );
 }
 
+/** The file-type icon, with a download badge until it's saved locally. */
+export function FileStatusIcon({
+  attachment,
+  state,
+}: {
+  attachment: MessageAttachment;
+  state: LocalFileState;
+}) {
+  const FileTypeIcon =
+    attachment.kind === "image"
+      ? ImageIcon
+      : attachment.kind === "video"
+        ? VideoIcon
+        : fileIconFor(attachment);
+
+  return (
+    <span className="file-icon">
+      {state.status === "downloading" ? (
+        <ProgressRing progress={state.progress} size={24} />
+      ) : (
+        <FileTypeIcon size={20} />
+      )}
+      {opensLocalFiles && state.status === "remote" ? (
+        <span className="file-icon-badge">
+          <ArrowDownIcon size={10} strokeWidth={2.6} />
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+/** Size line under a file name, swapped for progress or an error. */
+export function fileDetail(
+  attachment: MessageAttachment,
+  { state, error }: LocalFile,
+): string {
+  if (error) return error;
+  const size = formatBytes(attachment.sizeBytes);
+  if (state.status === "downloading") {
+    return state.progress === undefined
+      ? `Downloading… · ${size}`
+      : `${Math.round(state.progress * 100)}% of ${size}`;
+  }
+  return attachment.durationMs
+    ? `${size}, ${formatDuration(attachment.durationMs)}`
+    : size;
+}
+
 function VideoPreview({ attachment }: { attachment: MessageAttachment }) {
+  const localFile = useLocalFile(attachment);
   return (
     <div className="media-preview">
       <video
@@ -230,7 +316,43 @@ function VideoPreview({ attachment }: { attachment: MessageAttachment }) {
         preload="metadata"
         aria-label={attachment.fileName}
       />
-      <AttachmentDownloadButton attachment={attachment} />
+      <AttachmentDownloadButton
+        localFile={localFile}
+        fileName={attachment.fileName}
+      />
+      {localFile.error ? (
+        <span className="media-copy-status" role="status" aria-live="polite">
+          {localFile.error}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+function FileCard({ attachment }: { attachment: MessageAttachment }) {
+  const localFile = useLocalFile(attachment);
+  return (
+    <div className="file-card">
+      <button
+        type="button"
+        className="file-card-open"
+        onClick={localFile.open}
+        disabled={!localFile.file}
+        title={`Open ${attachment.fileName}`}
+      >
+        <FileStatusIcon attachment={attachment} state={localFile.state} />
+        <span className="file-card-copy">
+          <strong title={attachment.fileName}>{attachment.fileName}</strong>
+          <small className={localFile.error ? "file-detail-error" : undefined}>
+            {fileDetail(attachment, localFile)}
+          </small>
+        </span>
+      </button>
+      <AttachmentDownloadButton
+        localFile={localFile}
+        fileName={attachment.fileName}
+        className="file-download"
+      />
     </div>
   );
 }
@@ -240,44 +362,13 @@ export function AttachmentVisual({
 }: {
   attachment: MessageAttachment;
 }) {
-  if (
-    (attachment.kind === "image" || attachment.kind === "video") &&
-    attachment.url
-  ) {
-    if (attachment.kind === "image") {
-      return <ImagePreview attachment={attachment} />;
-    }
+  if (attachment.kind === "image" && attachment.url) {
+    return <ImagePreview attachment={attachment} />;
+  }
+  if (attachment.kind === "video" && attachment.url) {
     return <VideoPreview attachment={attachment} />;
   }
-
-  const FileTypeIcon = fileIconFor(attachment);
-
-  return (
-    <div className="file-card">
-      <span className="file-icon">
-        {attachment.kind === "image" ? (
-          <ImageIcon size={20} />
-        ) : attachment.kind === "video" ? (
-          <VideoIcon size={20} />
-        ) : (
-          <FileTypeIcon size={20} />
-        )}
-      </span>
-      <span className="file-card-copy">
-        <strong title={attachment.fileName}>{attachment.fileName}</strong>
-        <small>
-          {formatBytes(attachment.sizeBytes)}
-          {attachment.durationMs
-            ? `, ${formatDuration(attachment.durationMs)}`
-            : ""}
-        </small>
-      </span>
-      <AttachmentDownloadButton
-        attachment={attachment}
-        className="file-download"
-      />
-    </div>
-  );
+  return <FileCard attachment={attachment} />;
 }
 
 const URL_PATTERN = /(https?:\/\/[^\s<>"']+)/g;
