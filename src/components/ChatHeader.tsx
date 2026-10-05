@@ -1,14 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  ChevronDownIcon,
   DownloadIcon,
-  MoreIcon,
   SearchIcon,
   SelectIcon,
   TrashIcon,
   UserIcon,
   XIcon,
 } from "../lib/icons";
+import { BrandMark } from "./BrandMark";
 
 interface ChatHeaderProps {
   isSelectionMode: boolean;
@@ -37,7 +36,6 @@ export function ChatHeader({
   onDeleteSelected,
   onSignOut,
 }: ChatHeaderProps) {
-  const [isExpanded, setIsExpanded] = useState(true);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isAccountOpen, setIsAccountOpen] = useState(false);
   const accountRef = useRef<HTMLDivElement>(null);
@@ -46,10 +44,6 @@ export function ChatHeader({
   useEffect(() => {
     if (isSearchOpen) searchRef.current?.focus();
   }, [isSearchOpen]);
-
-  useEffect(() => {
-    if (isSelectionMode) setIsExpanded(true);
-  }, [isSelectionMode]);
 
   useEffect(() => {
     function handlePointerDown(event: PointerEvent) {
@@ -63,11 +57,11 @@ export function ChatHeader({
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
         setIsSearchOpen(true);
+        searchRef.current?.focus();
         return;
       }
       if (event.key === "Escape") {
         setIsAccountOpen(false);
-        setIsSearchOpen(false);
         if (isSelectionMode) onCancelSelection();
       }
     }
@@ -83,166 +77,148 @@ export function ChatHeader({
     };
   }, [isSelectionMode, onCancelSelection]);
 
+  function closeSearch() {
+    onSearchChange("");
+    setIsSearchOpen(false);
+  }
+
   async function handleSignOut() {
     setIsAccountOpen(false);
     await onSignOut();
   }
 
-  function toggleHeader() {
-    const nextExpanded = !isExpanded;
-    setIsExpanded(nextExpanded);
-    if (!nextExpanded) {
-      setIsAccountOpen(false);
-      setIsSearchOpen(false);
-    }
+  if (isSelectionMode) {
+    return (
+      <header className="chat-header chat-header--selection">
+        <div className="chat-header-inner">
+          <div className="header-start">
+            <button
+              type="button"
+              className="icon-button"
+              onClick={onCancelSelection}
+              aria-label="Cancel selection"
+              title="Cancel selection (Esc)"
+            >
+              <XIcon size={20} />
+            </button>
+            <span className="selection-count" aria-live="polite">
+              {selectedMessageCount === 0
+                ? "Select messages"
+                : `${selectedMessageCount} selected`}
+            </span>
+          </div>
+          <div className="header-actions">
+            <button
+              type="button"
+              className="header-button"
+              onClick={onDownloadSelected}
+              disabled={selectedAttachmentCount === 0 || isDownloading}
+              title={
+                selectedAttachmentCount === 0
+                  ? "Select a message with files to download"
+                  : `Download ${selectedAttachmentCount} file${selectedAttachmentCount === 1 ? "" : "s"}`
+              }
+            >
+              <DownloadIcon size={17} />
+              <span className="header-button-label">
+                {isDownloading ? "Downloading…" : "Download"}
+              </span>
+            </button>
+            <button
+              type="button"
+              className="header-button header-button--danger"
+              onClick={onDeleteSelected}
+              disabled={selectedMessageCount === 0 || isDownloading}
+            >
+              <TrashIcon size={17} />
+              <span className="header-button-label">Delete</span>
+            </button>
+          </div>
+        </div>
+      </header>
+    );
+  }
+
+  if (isSearchOpen) {
+    return (
+      <header className="chat-header chat-header--search">
+        <div className="chat-header-inner">
+          <label className="search-field">
+            <SearchIcon size={18} />
+            <span className="sr-only">Search messages</span>
+            <input
+              ref={searchRef}
+              value={searchQuery}
+              onChange={(event) => onSearchChange(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") closeSearch();
+              }}
+              placeholder="Search messages and file names"
+              type="search"
+            />
+          </label>
+          <button type="button" className="text-button" onClick={closeSearch}>
+            Cancel
+          </button>
+        </div>
+      </header>
+    );
   }
 
   return (
-    <header
-      className={`chat-header ${isExpanded ? "chat-header--expanded" : "chat-header--collapsed"} ${isSelectionMode ? "chat-header--selection" : ""}`}
-    >
+    <header className="chat-header">
       <div className="chat-header-inner">
-        <div className="chat-heading">
-          <span className="brand-mark" aria-hidden="true">
-            os
-          </span>
-          <div>
-            <p className="eyebrow">ONE / SHARE</p>
-            <h1>Saved messages</h1>
-          </div>
+        <div className="header-start">
+          <BrandMark size={24} />
+          <h1 className="header-title">OneShare</h1>
         </div>
-        <div className="chat-header-actions">
-          {isSelectionMode ? (
-            <div className="selection-toolbar">
-              <span className="selection-count" aria-live="polite">
-                {selectedMessageCount} selected
-                {selectedAttachmentCount > 0
-                  ? ` · ${selectedAttachmentCount} file${selectedAttachmentCount === 1 ? "" : "s"}`
-                  : ""}
-              </span>
-              <button
-                type="button"
-                className="icon-button"
-                onClick={onCancelSelection}
-                aria-label="Cancel message selection"
-                title="Cancel selection"
-              >
-                <XIcon size={18} />
-              </button>
-              <button
-                type="button"
-                className="selection-download-button"
-                onClick={onDownloadSelected}
-                disabled={selectedAttachmentCount === 0 || isDownloading}
-                title={
-                  selectedAttachmentCount === 0
-                    ? "Select a file or image to download"
-                    : "Download selected files"
-                }
-              >
-                <DownloadIcon size={16} />
-                <span>{isDownloading ? "Downloading…" : "Download"}</span>
-              </button>
-              <button
-                type="button"
-                className="selection-delete-button"
-                onClick={onDeleteSelected}
-                disabled={selectedMessageCount === 0 || isDownloading}
-              >
-                <TrashIcon size={16} />
-                <span>Delete</span>
-              </button>
-            </div>
-          ) : isExpanded ? (
-            <>
-              <button
-                type="button"
-                className="header-action"
-                onClick={onStartSelection}
-                aria-label="Select messages"
-                title="Select messages"
-              >
-                <SelectIcon size={17} />
-                <span className="header-action-label">Select</span>
-              </button>
-              {isSearchOpen ? (
-                <label className="search-field">
-                  <SearchIcon size={17} />
-                  <span className="sr-only">Search messages</span>
-                  <input
-                    ref={searchRef}
-                    value={searchQuery}
-                    onChange={(event) => onSearchChange(event.target.value)}
-                    placeholder="Search messages"
-                  />
-                  <button
-                    type="button"
-                    className="icon-button"
-                    onClick={() => {
-                      onSearchChange("");
-                      setIsSearchOpen(false);
-                    }}
-                    aria-label="Close search"
-                  >
-                    <XIcon size={16} />
-                  </button>
-                </label>
-              ) : (
-                <button
-                  type="button"
-                  className="icon-button header-icon"
-                  onClick={() => setIsSearchOpen(true)}
-                  aria-label="Search messages"
-                  title="Search messages"
-                >
-                  <SearchIcon size={20} />
-                </button>
-              )}
-              <div className="account-wrap" ref={accountRef}>
-                <button
-                  type="button"
-                  className={`account-button ${isAccountOpen ? "account-button--active" : ""}`}
-                  onClick={() => setIsAccountOpen((open) => !open)}
-                  aria-expanded={isAccountOpen}
-                  aria-haspopup="menu"
-                  aria-label="Open account menu"
-                >
-                  <span className="account-avatar">
-                    <UserIcon size={17} />
-                  </span>
-                  <span className="account-label">Account</span>
-                  <MoreIcon size={17} />
-                </button>
-                {isAccountOpen ? (
-                  <div className="account-menu" role="menu">
-                    <div className="account-menu-head">
-                      <span className="status-dot" />
-                      <span>Private relay</span>
-                    </div>
-                    <p>Messages sync whenever this account is signed in.</p>
-                    <button
-                      type="button"
-                      className="menu-action"
-                      role="menuitem"
-                      onClick={() => void handleSignOut()}
-                    >
-                      Sign out
-                    </button>
-                  </div>
-                ) : null}
-              </div>
-            </>
-          ) : null}
+        <div className="header-actions">
           <button
             type="button"
-            className="icon-button header-toggle"
-            onClick={toggleHeader}
-            aria-expanded={isExpanded}
-            aria-label={isExpanded ? "Collapse header" : "Expand header"}
-            title={isExpanded ? "Collapse header" : "Expand header"}
+            className="icon-button"
+            onClick={() => setIsSearchOpen(true)}
+            aria-label="Search messages"
+            title="Search (Ctrl+K)"
           >
-            <ChevronDownIcon size={18} />
+            <SearchIcon size={19} />
           </button>
+          <button
+            type="button"
+            className="icon-button"
+            onClick={onStartSelection}
+            aria-label="Select messages"
+            title="Select messages"
+          >
+            <SelectIcon size={19} />
+          </button>
+          <div className="account-wrap" ref={accountRef}>
+            <button
+              type="button"
+              className="icon-button"
+              onClick={() => setIsAccountOpen((open) => !open)}
+              aria-expanded={isAccountOpen}
+              aria-haspopup="menu"
+              aria-label="Account"
+              title="Account"
+            >
+              <UserIcon size={19} />
+            </button>
+            {isAccountOpen ? (
+              <div className="menu" role="menu">
+                <p className="menu-note">
+                  Messages sync to every device signed in to this account.
+                </p>
+                <button
+                  type="button"
+                  className="menu-item"
+                  role="menuitem"
+                  onClick={() => void handleSignOut()}
+                >
+                  Sign out
+                </button>
+              </div>
+            ) : null}
+          </div>
         </div>
       </div>
     </header>

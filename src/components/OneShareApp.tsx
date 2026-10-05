@@ -4,9 +4,45 @@ import { ChatHeader } from "./ChatHeader";
 import { Composer } from "./Composer";
 import { DeleteDialog } from "./DeleteDialog";
 import { MessageList } from "./MessageList";
-import { ArrowDownIcon } from "../lib/icons";
+import { ArrowDownIcon, XIcon } from "../lib/icons";
 import { useChat, type LocalMessage } from "../hooks/useChat";
 import { downloadFiles, type DownloadFile } from "../lib/download";
+
+function Toast({
+  tone,
+  message,
+  onDismiss,
+}: {
+  tone: "notice" | "error";
+  message: string;
+  onDismiss: () => void;
+}) {
+  const dismissRef = useRef(onDismiss);
+  dismissRef.current = onDismiss;
+
+  useEffect(() => {
+    if (tone !== "notice") return;
+    const timeout = window.setTimeout(() => dismissRef.current(), 4000);
+    return () => window.clearTimeout(timeout);
+  }, [tone, message]);
+
+  return (
+    <div
+      className={`toast toast--${tone}`}
+      role={tone === "error" ? "alert" : "status"}
+    >
+      <span>{message}</span>
+      <button
+        type="button"
+        className="icon-button"
+        onClick={onDismiss}
+        aria-label="Dismiss"
+      >
+        <XIcon size={16} />
+      </button>
+    </div>
+  );
+}
 
 export function OneShareApp() {
   const { signOut } = useAuthActions();
@@ -274,45 +310,29 @@ export function OneShareApp() {
           onConfirm={confirmDelete}
         />
       ) : null}
-      {deleteError ? (
-        <div className="toast-error" role="alert">
-          {deleteError}
-          <button
-            type="button"
-            className="icon-button"
-            onClick={() => setDeleteError(undefined)}
-            aria-label="Dismiss error"
-          >
-            ×
-          </button>
-        </div>
-      ) : null}
-      {downloadNotice ? (
-        <div className="toast-success" role="status">
-          {downloadNotice}
-          <button
-            type="button"
-            className="icon-button"
-            onClick={() => setDownloadNotice(undefined)}
-            aria-label="Dismiss download notice"
-          >
-            ×
-          </button>
-        </div>
-      ) : null}
-      {downloadError ? (
-        <div className="toast-error" role="alert">
-          {downloadError}
-          <button
-            type="button"
-            className="icon-button"
-            onClick={() => setDownloadError(undefined)}
-            aria-label="Dismiss download error"
-          >
-            ×
-          </button>
-        </div>
-      ) : null}
+      <div className="toasts">
+        {downloadNotice ? (
+          <Toast
+            tone="notice"
+            message={downloadNotice}
+            onDismiss={() => setDownloadNotice(undefined)}
+          />
+        ) : null}
+        {deleteError ? (
+          <Toast
+            tone="error"
+            message={deleteError}
+            onDismiss={() => setDeleteError(undefined)}
+          />
+        ) : null}
+        {downloadError ? (
+          <Toast
+            tone="error"
+            message={downloadError}
+            onDismiss={() => setDownloadError(undefined)}
+          />
+        ) : null}
+      </div>
     </div>
   );
 }

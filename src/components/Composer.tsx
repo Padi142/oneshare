@@ -396,135 +396,142 @@ export function Composer({ onSendMessage, onUploadFile }: ComposerProps) {
   const canSend = !isSending && Boolean(text.trim() || staged.length);
   const composerStatus = isSending
     ? isUploading
-      ? "Waiting for upload"
-      : "Sending"
+      ? "Finishing upload…"
+      : "Sending…"
     : isUploading
-      ? "Uploading"
+      ? "Uploading…"
       : undefined;
 
   return (
-    <div className="composer-wrap">
+    <div className="composer">
       {isDragging ? (
         <div className="drop-overlay" role="status" aria-live="polite">
-          <PaperclipIcon size={21} />
-          <span>Drop anywhere to attach</span>
+          <span>Drop to attach</span>
         </div>
       ) : null}
-      {staged.length > 0 ? (
-        <div className="staged-tray" aria-label="Files ready to send">
-          {staged.map((item) => (
-            <div
-              className={`staged-item staged-item--${item.state}`}
-              key={item.id}
-            >
-              {item.kind === "image" ? (
-                <img src={item.previewUrl} alt="" />
-              ) : (
-                <span className={`staged-icon staged-icon--${item.kind}`}>
-                  {attachmentIcon(item.kind)}
-                </span>
-              )}
-              <span className="staged-copy">
-                <strong title={item.file.name}>{item.file.name}</strong>
-                <small>
-                  {item.state === "uploading"
-                    ? `${item.progress}%`
-                    : formatBytes(item.file.size)}
-                </small>
-              </span>
-              {item.state === "uploading" ? (
-                <span
-                  className="staged-progress"
-                  aria-label={`Uploading ${item.progress}%`}
-                >
-                  <span style={{ width: `${item.progress}%` }} />
-                </span>
-              ) : null}
-              {item.state === "error" ? (
-                <button
-                  className="staged-retry"
-                  type="button"
-                  onClick={() => void retryFile(item)}
-                >
-                  Retry
-                </button>
-              ) : null}
-              {item.state !== "uploading" ? (
-                <button
-                  className="icon-button staged-remove"
-                  type="button"
-                  onClick={() => removeFile(item.id)}
-                  aria-label={`Remove ${item.file.name}`}
-                >
-                  <XIcon size={14} />
-                </button>
-              ) : null}
-            </div>
-          ))}
-        </div>
+      {error ? (
+        <p className="composer-error" role="alert">
+          {error}
+        </p>
       ) : null}
-      <div className="composer-main">
-        <button
-          className="icon-button composer-attach"
-          type="button"
-          onClick={() => inputRef.current?.click()}
-          aria-label="Attach files"
-          title="Attach files"
-          disabled={isSending}
-        >
-          <PaperclipIcon size={21} />
-        </button>
-        <input
-          ref={inputRef}
-          type="file"
-          className="sr-only"
-          multiple
-          onChange={(event) => {
-            if (event.target.files) addFiles(event.target.files);
-            event.target.value = "";
-          }}
-        />
-        <textarea
-          ref={textareaRef}
-          className="composer-textarea"
-          value={text}
-          onChange={(event) => setText(event.target.value)}
-          onKeyDown={handleKeyDown}
-          onPaste={handlePaste}
-          placeholder="Write a note or drop something here…"
-          rows={1}
-          aria-label="Message"
-          disabled={isSending}
-        />
-        <button
-          className="send-button"
-          type="button"
-          onClick={() => void handleSubmit()}
-          disabled={!canSend}
-          aria-label="Send message"
-          title="Send message"
-        >
-          <SendIcon size={19} />
-        </button>
-      </div>
-      <div className="composer-footer">
-        <span>
-          {error ? (
-            <span className="composer-error" role="alert">
-              {error}
-            </span>
-          ) : (
-            <>
-              Enter to send <kbd>⇧</kbd> Enter for a new line
-            </>
-          )}
-        </span>
-        {composerStatus ? (
-          <span className="composer-status">
-            <LoaderIcon className="spin" size={14} /> {composerStatus}
-          </span>
+      <div className="composer-box">
+        {staged.length > 0 ? (
+          <ul className="staged-list" aria-label="Attachments">
+            {staged.map((item) => (
+              <li
+                className={`staged-item staged-item--${item.state}`}
+                key={item.id}
+              >
+                {item.kind === "image" ? (
+                  <img src={item.previewUrl} alt="" />
+                ) : (
+                  <span className="staged-icon">
+                    {attachmentIcon(item.kind)}
+                  </span>
+                )}
+                <span className="staged-copy">
+                  <strong title={item.file.name}>{item.file.name}</strong>
+                  <small>
+                    {item.state === "uploading"
+                      ? `Uploading ${item.progress}%`
+                      : item.state === "error"
+                        ? "Upload failed"
+                        : formatBytes(item.file.size)}
+                  </small>
+                </span>
+                {item.state === "uploading" ? (
+                  <span
+                    className="staged-progress"
+                    role="progressbar"
+                    aria-valuenow={item.progress}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-label={`Uploading ${item.file.name}`}
+                  >
+                    <span style={{ width: `${item.progress}%` }} />
+                  </span>
+                ) : null}
+                {item.state === "error" ? (
+                  <button
+                    className="text-button staged-retry"
+                    type="button"
+                    onClick={() => void retryFile(item)}
+                  >
+                    Retry
+                  </button>
+                ) : null}
+                {item.state !== "uploading" ? (
+                  <button
+                    className="icon-button staged-remove"
+                    type="button"
+                    onClick={() => removeFile(item.id)}
+                    aria-label={`Remove ${item.file.name}`}
+                  >
+                    <XIcon size={14} />
+                  </button>
+                ) : null}
+              </li>
+            ))}
+          </ul>
         ) : null}
+        <div className="composer-row">
+          <button
+            className="icon-button composer-attach"
+            type="button"
+            onClick={() => inputRef.current?.click()}
+            aria-label="Attach files"
+            title="Attach files"
+            disabled={isSending}
+          >
+            <PaperclipIcon size={20} />
+          </button>
+          <input
+            ref={inputRef}
+            type="file"
+            className="sr-only"
+            multiple
+            tabIndex={-1}
+            onChange={(event) => {
+              if (event.target.files) addFiles(event.target.files);
+              event.target.value = "";
+            }}
+          />
+          <textarea
+            ref={textareaRef}
+            className="composer-textarea"
+            value={text}
+            onChange={(event) => setText(event.target.value)}
+            onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
+            placeholder="Message"
+            rows={1}
+            aria-label="Message"
+            disabled={isSending}
+          />
+          <button
+            className="send-button"
+            type="button"
+            onClick={() => void handleSubmit()}
+            disabled={!canSend}
+            aria-label="Send"
+            title="Send (Enter)"
+          >
+            {isSending ? (
+              <LoaderIcon className="spin" size={18} />
+            ) : (
+              <SendIcon size={18} />
+            )}
+          </button>
+        </div>
       </div>
+      <p className="composer-hint">
+        {composerStatus ?? (
+          <>
+            <kbd>Enter</kbd> to send, <kbd>Shift</kbd> + <kbd>Enter</kbd> for a
+            new line
+          </>
+        )}
+      </p>
     </div>
   );
 }

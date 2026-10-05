@@ -1,6 +1,7 @@
 import { FormEvent, useId, useState } from "react";
 import { useAuthActions } from "@convex-dev/auth/react";
-import { ArrowLeftIcon, ArrowDownIcon, LoaderIcon } from "../lib/icons";
+import { LoaderIcon } from "../lib/icons";
+import { BrandMark } from "./BrandMark";
 import { explainAuthFailure } from "../lib/authErrors";
 import type { AuthMode } from "../types";
 
@@ -47,52 +48,18 @@ export function AuthScreen() {
 
   return (
     <main className="auth-screen">
-      <section className="auth-intro" aria-labelledby="auth-title">
-        <div className="auth-intro-topline">
-          <span className="brand-mark brand-mark--large" aria-hidden="true">
-            os
-          </span>
-          <span className="eyebrow">ONE / SHARE</span>
-        </div>
-        <div className="auth-intro-copy">
-          <p className="kicker">Your personal relay</p>
-          <h1 id="auth-title">
-            Keep the useful
-            <br />
-            <em>things</em> close.
-          </h1>
-          <p className="auth-description">
-            A quiet place for the links, notes and files that move with you.
-          </p>
-        </div>
-        <div className="auth-intro-footer" aria-hidden="true">
-          <span>01</span>
-          <span className="auth-rule" />
-          <span>Private by default</span>
-        </div>
-      </section>
+      <div className="auth-card">
+        <BrandMark size={48} className="auth-mark" />
+        <h1 className="auth-title">
+          {isSignIn ? "Sign in to OneShare" : "Create your account"}
+        </h1>
+        <p className="auth-subtitle">
+          Send notes, links and files between your own devices.
+        </p>
 
-      <section
-        className="auth-panel"
-        aria-label={isSignIn ? "Sign in" : "Create account"}
-      >
-        <div className="auth-panel-inner">
-          <div className="auth-panel-heading">
-            <span className="eyebrow">
-              {isSignIn ? "Welcome back" : "First visit"}
-            </span>
-            <h2>{isSignIn ? "Sign in to your relay" : "Make your relay"}</h2>
-            <p>
-              {isSignIn
-                ? "Pick up where you left off."
-                : "One account, every device."}
-            </p>
-          </div>
-
-          <form className="auth-form" onSubmit={handleSubmit}>
-            <label className="field-label" htmlFor={emailId}>
-              Email
-            </label>
+        <form className="auth-form" onSubmit={handleSubmit}>
+          <label className="field">
+            <span className="field-label">Email</span>
             <input
               id={emailId}
               className="text-input"
@@ -104,10 +71,10 @@ export function AuthScreen() {
               autoFocus
               disabled={isSubmitting}
             />
+          </label>
 
-            <label className="field-label" htmlFor={passwordId}>
-              Password
-            </label>
+          <label className="field">
+            <span className="field-label">Password</span>
             <input
               id={passwordId}
               className="text-input"
@@ -118,51 +85,49 @@ export function AuthScreen() {
               minLength={8}
               required
               disabled={isSubmitting}
+              aria-describedby={isSignIn ? undefined : `${passwordId}-hint`}
             />
+            {isSignIn ? null : (
+              <span className="field-hint" id={`${passwordId}-hint`}>
+                At least 8 characters.
+              </span>
+            )}
+          </label>
 
-            {feedback ? (
-              <p
-                className={`form-feedback form-feedback--${feedback.tone}`}
-                role={feedback.tone === "error" ? "alert" : "status"}
-              >
-                {feedback.message}
-              </p>
-            ) : null}
-
-            <button
-              className="primary-button auth-submit"
-              type="submit"
-              disabled={isSubmitting}
+          {feedback ? (
+            <p
+              className={`form-feedback form-feedback--${feedback.tone}`}
+              role={feedback.tone === "error" ? "alert" : "status"}
             >
-              <span>{isSignIn ? "Enter relay" : "Create relay"}</span>
-              {isSubmitting ? (
-                <LoaderIcon className="spin" size={17} />
-              ) : (
-                <ArrowDownIcon size={17} />
-              )}
-            </button>
-          </form>
+              {feedback.message}
+            </p>
+          ) : null}
 
-          <div className="auth-switch">
-            <span>{isSignIn ? "New here?" : "Already have a relay?"}</span>
-            <button
-              type="button"
-              className="text-button"
-              onClick={() => {
-                setMode(isSignIn ? "signUp" : "signIn");
-                setFeedback(undefined);
-              }}
-              disabled={isSubmitting}
-            >
-              {isSignIn ? "Create an account" : "Sign in"}
-              <ArrowLeftIcon size={14} />
-            </button>
-          </div>
-        </div>
-        <p className="auth-panel-note">
-          <span className="status-dot" /> Synced across your signed-in devices
+          <button
+            className="primary-button auth-submit"
+            type="submit"
+            disabled={isSubmitting}
+          >
+            {isSubmitting ? <LoaderIcon className="spin" size={17} /> : null}
+            <span>{isSignIn ? "Sign in" : "Create account"}</span>
+          </button>
+        </form>
+
+        <p className="auth-switch">
+          {isSignIn ? "New to OneShare?" : "Already have an account?"}{" "}
+          <button
+            type="button"
+            className="link-button"
+            onClick={() => {
+              setMode(isSignIn ? "signUp" : "signIn");
+              setFeedback(undefined);
+            }}
+            disabled={isSubmitting}
+          >
+            {isSignIn ? "Create an account" : "Sign in"}
+          </button>
         </p>
-      </section>
+      </div>
     </main>
   );
 }

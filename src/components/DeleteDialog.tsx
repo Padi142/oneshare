@@ -1,5 +1,4 @@
 import { useEffect, useRef } from "react";
-import { TrashIcon, XIcon } from "../lib/icons";
 import { messageText } from "../lib/utils";
 import type { LocalMessage } from "../hooks/useChat";
 
@@ -41,37 +40,26 @@ export function DeleteDialog({
       }}
     >
       <section
-        className="confirm-dialog"
+        className="dialog"
         role="alertdialog"
         aria-modal="true"
         aria-labelledby="delete-title"
         aria-describedby="delete-description"
       >
-        <button
-          type="button"
-          className="icon-button dialog-close"
-          onClick={onCancel}
-          disabled={isDeleting}
-          aria-label="Close dialog"
-        >
-          <XIcon size={18} />
-        </button>
-        <span className="dialog-icon">
-          <TrashIcon size={20} />
-        </span>
-        <p className="kicker">Remove from relay</p>
         <h2 id="delete-title">
           {isBulkDelete
             ? `Delete ${messages.length} messages?`
-            : "Delete this message?"}
+            : "Delete message?"}
         </h2>
         <p id="delete-description" className="dialog-description">
           {isBulkDelete ? (
-            "These messages will disappear from every signed-in device."
+            "They will be removed from all your devices, including any attached files."
           ) : (
             <>
-              “{preview.length > 96 ? `${preview.slice(0, 96)}…` : preview}”
-              will disappear from every signed-in device.
+              <span className="dialog-quote">
+                {preview.length > 96 ? `${preview.slice(0, 96)}…` : preview}
+              </span>{" "}
+              will be removed from all your devices.
             </>
           )}
         </p>
@@ -83,7 +71,7 @@ export function DeleteDialog({
             onClick={onCancel}
             disabled={isDeleting}
           >
-            Keep it
+            Cancel
           </button>
           <button
             type="button"
@@ -91,11 +79,7 @@ export function DeleteDialog({
             onClick={() => void onConfirm()}
             disabled={isDeleting}
           >
-            {isDeleting
-              ? "Deleting…"
-              : isBulkDelete
-                ? "Delete messages"
-                : "Delete message"}
+            {isDeleting ? "Deleting…" : "Delete"}
           </button>
         </div>
       </section>

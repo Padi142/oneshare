@@ -2,6 +2,7 @@ import { ConvexAuthProvider, useConvexAuth } from "@convex-dev/auth/react";
 import { ConvexReactClient } from "convex/react";
 import { OneShareApp } from "./components/OneShareApp";
 import { AuthScreen } from "./components/AuthScreen";
+import { BrandMark } from "./components/BrandMark";
 
 const convexUrl = import.meta.env.VITE_CONVEX_URL ?? import.meta.env.CONVEX_URL;
 if (!convexUrl) {
@@ -15,9 +16,8 @@ function AuthenticatedApp() {
   const { isLoading, isAuthenticated } = useConvexAuth();
   if (isLoading) {
     return (
-      <main className="boot-screen">
-        <span className="brand-mark brand-mark--large">os</span>
-        <span className="boot-line" />
+      <main className="boot-screen" aria-label="Loading OneShare">
+        <BrandMark size={44} />
       </main>
     );
   }

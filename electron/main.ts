@@ -1,4 +1,11 @@
-import { app, BrowserWindow, ipcMain, Menu, shell } from "electron";
+import {
+  app,
+  BrowserWindow,
+  ipcMain,
+  Menu,
+  nativeTheme,
+  shell,
+} from "electron";
 import type { MenuItemConstructorOptions, Rectangle } from "electron";
 import {
   createWriteStream,
@@ -478,7 +485,10 @@ function createMainWindow(): BrowserWindow {
     minHeight: MIN_WINDOW_HEIGHT,
     show: false,
     title: APP_NAME,
-    backgroundColor: "#101820",
+    ...(process.platform === "linux"
+      ? { icon: join(app.getAppPath(), "dist", "icon.png") }
+      : {}),
+    backgroundColor: nativeTheme.shouldUseDarkColors ? "#111214" : "#ffffff",
     webPreferences: {
       preload: preloadPath,
       contextIsolation: true,

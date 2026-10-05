@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
-  CheckDoubleIcon,
+  CheckIcon,
   ClipboardIcon,
   DownloadIcon,
   FileIcon,
@@ -200,7 +200,7 @@ function AttachmentDownloadButton({
       {state === "downloading" ? (
         <LoaderIcon className="spin" size={16} />
       ) : state === "downloaded" ? (
-        <CheckDoubleIcon size={16} />
+        <CheckIcon size={16} />
       ) : (
         <DownloadIcon size={16} />
       )}
@@ -234,25 +234,23 @@ function AttachmentVisual({ attachment }: { attachment: MessageAttachment }) {
     return <VideoPreview attachment={attachment} />;
   }
 
-  const isImage = attachment.kind === "image";
-  const isVideo = attachment.kind === "video";
   return (
     <div className="file-card">
-      <span className={`file-icon file-icon--${attachment.kind}`}>
-        {isImage ? (
-          <ImageIcon size={21} />
-        ) : isVideo ? (
-          <VideoIcon size={21} />
+      <span className="file-icon">
+        {attachment.kind === "image" ? (
+          <ImageIcon size={20} />
+        ) : attachment.kind === "video" ? (
+          <VideoIcon size={20} />
         ) : (
-          <FileIcon size={21} />
+          <FileIcon size={20} />
         )}
       </span>
       <span className="file-card-copy">
-        <strong>{attachment.fileName}</strong>
+        <strong title={attachment.fileName}>{attachment.fileName}</strong>
         <small>
           {formatBytes(attachment.sizeBytes)}
           {attachment.durationMs
-            ? ` · ${formatDuration(attachment.durationMs)}`
+            ? `, ${formatDuration(attachment.durationMs)}`
             : ""}
         </small>
       </span>
@@ -264,6 +262,35 @@ function AttachmentVisual({ attachment }: { attachment: MessageAttachment }) {
   );
 }
 
+const URL_PATTERN = /(https?:\/\/[^\s<>"']+)/g;
+const TRAILING_PUNCTUATION = /[.,!?;:)\]}]+$/;
+
+/** Renders message text with bare http(s) URLs turned into links. */
+function MessageText({ text }: { text: string }) {
+  const parts = text.split(URL_PATTERN);
+  return (
+    <p className="message-text">
+      {parts.map((part, index) => {
+        if (index % 2 === 0) return part;
+        const trailing = part.match(TRAILING_PUNCTUATION)?.[0] ?? "";
+        const url = trailing ? part.slice(0, -trailing.length) : part;
+        return (
+          <span key={index}>
+            <a href={url} target="_blank" rel="noreferrer">
+              {url}
+            </a>
+            {trailing}
+          </span>
+        );
+      })}
+    </p>
+  );
+}
+
+const canHover = () =>
+  typeof window !== "undefined" &&
+  window.matchMedia?.("(hover: hover)").matches;
+
 export function MessageBubble({
   message,
   isSelectionMode,
@@ -273,8 +300,28 @@ export function MessageBubble({
   onRequestDelete,
 }: MessageBubbleProps) {
   const [copied, setCopied] = useState(false);
+  const [isActive, setIsActive] = useState(false);
+  const rowRef = useRef<HTMLElement>(null);
   const text = messageText(message);
   const attachments = message.attachments;
+  const hasMedia = attachments.some(
+    (attachment) =>
+      (attachment.kind === "image" || attachment.kind === "video") &&
+      attachment.url,
+  );
+
+  useEffect(() => {
+    if (!isActive) return;
+    function handlePointerDown(event: PointerEvent) {
+      if (!rowRef.current?.contains(event.target as Node)) setIsActive(false);
+    }
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, [isActive]);
+
+  useEffect(() => {
+    if (isSelectionMode) setIsActive(false);
+  }, [isSelectionMode]);
 
   async function copyMessage() {
     if (!text) return;
@@ -287,86 +334,95 @@ export function MessageBubble({
     }
   }
 
+  // Touch devices have no hover, so a tap on the bubble reveals the actions.
+  function handleBubbleClick(event: React.MouseEvent<HTMLDivElement>) {
+    if (isSelectionMode || canHover()) return;
+    if ((event.target as HTMLElement).closest("a, button, video")) return;
+    setIsActive((active) => !active);
+  }
+
   return (
     <article
-      className={`message-row ${message.localStatus ? "message-row--local" : ""} ${isSelectionMode ? "message-row--selection" : ""} ${isSelected ? "message-row--selected" : ""}`}
+      ref={rowRef}
+      className={[
+        "message-row",
+        isSelectionMode ? "message-row--selecting" : "",
+        isSelected ? "message-row--selected" : "",
+        isActive ? "message-row--active" : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
       data-message-id={message._id}
     >
+      {isSelectionMode ? (
+        <button
+          type="button"
+          className="message-select"
+          onClick={() => onToggleSelect(message._id)}
+          aria-pressed={isSelected}
+          aria-label={isSelected ? "Deselect message" : "Select message"}
+        >
+          <span className="message-check" aria-hidden="true">
+            {isSelected ? <CheckIcon size={14} strokeWidth={2.6} /> : null}
+          </span>
+        </button>
+      ) : null}
       <div className="message-wrap">
-        <div className="message-bubble">
+        {isSelectionMode ? null : (
+          <div className="message-actions" aria-label="Message actions">
+            {text ? (
+              <button
+                type="button"
+                className="icon-button"
+                onClick={copyMessage}
+                aria-label={copied ? "Copied" : "Copy text"}
+                title={copied ? "Copied" : "Copy text"}
+              >
+                {copied ? <CheckIcon size={16} /> : <ClipboardIcon size={16} />}
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className="icon-button"
+              onClick={() => onStartSelection(message._id)}
+              aria-label="Select message"
+              title="Select"
+            >
+              <SelectIcon size={16} />
+            </button>
+            <button
+              type="button"
+              className="icon-button icon-button--danger"
+              onClick={() => onRequestDelete(message)}
+              aria-label="Delete message"
+              title="Delete"
+            >
+              <TrashIcon size={16} />
+            </button>
+          </div>
+        )}
+        <div
+          className={`message-bubble ${hasMedia && !text ? "message-bubble--media" : ""}`}
+          onClick={handleBubbleClick}
+        >
           {attachments.map((attachment) => (
             <AttachmentVisual
               key={`${message._id}-${attachment.storageId ?? attachment.fileName}`}
               attachment={attachment}
             />
           ))}
-          {text ? <p className="message-copy">{text}</p> : null}
+          {text ? <MessageText text={text} /> : null}
           <footer className="message-meta">
-            <time dateTime={new Date(message._creationTime).toISOString()}>
-              {formatTime(message._creationTime)}
-            </time>
             {message.localStatus === "sending" ? (
-              <span className="message-state">Sending…</span>
-            ) : null}
-            {message.localStatus === "failed" ? (
-              <span className="message-state message-state--error">
-                Not sent
-              </span>
-            ) : null}
-            {!message.localStatus ? (
-              <CheckDoubleIcon className="message-checks" size={16} />
-            ) : null}
-          </footer>
-          <div className="message-actions" aria-label="Message actions">
-            {isSelectionMode ? (
-              <button
-                type="button"
-                className="icon-button selection-toggle"
-                onClick={() => onToggleSelect(message._id)}
-                aria-label={isSelected ? "Deselect message" : "Select message"}
-                aria-pressed={isSelected}
-                title={isSelected ? "Deselect message" : "Select message"}
-              >
-                <SelectIcon size={15} />
-              </button>
+              <span>Sending…</span>
+            ) : message.localStatus === "failed" ? (
+              <span className="message-meta-error">Not sent</span>
             ) : (
-              <>
-                {text ? (
-                  <button
-                    type="button"
-                    className="icon-button"
-                    onClick={copyMessage}
-                    aria-label={copied ? "Copied" : "Copy text"}
-                    title={copied ? "Copied" : "Copy text"}
-                  >
-                    {copied ? (
-                      <CheckDoubleIcon size={15} />
-                    ) : (
-                      <ClipboardIcon size={15} />
-                    )}
-                  </button>
-                ) : null}
-                <button
-                  type="button"
-                  className="icon-button"
-                  onClick={() => onStartSelection(message._id)}
-                  aria-label="Select message"
-                  title="Select message"
-                >
-                  <SelectIcon size={15} />
-                </button>
-                <button
-                  type="button"
-                  className="icon-button icon-button--danger"
-                  onClick={() => onRequestDelete(message)}
-                  aria-label="Delete message"
-                  title="Delete message"
-                >
-                  <TrashIcon size={15} />
-                </button>
-              </>
+              <time dateTime={new Date(message._creationTime).toISOString()}>
+                {formatTime(message._creationTime)}
+              </time>
             )}
-          </div>
+          </footer>
         </div>
       </div>
     </article>

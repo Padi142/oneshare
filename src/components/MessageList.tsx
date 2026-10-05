@@ -1,4 +1,5 @@
 import type { RefObject, UIEvent } from "react";
+import { BrandMark } from "./BrandMark";
 import { MessageBubble } from "./MessageBubble";
 import { formatDate, isSameDate, matchesSearch } from "../lib/utils";
 import type { LocalMessage } from "../hooks/useChat";
@@ -30,17 +31,21 @@ function LoadingMessages() {
 }
 
 function EmptyMessages({ hasSearch }: { hasSearch: boolean }) {
+  if (hasSearch) {
+    return (
+      <div className="empty-messages">
+        <h2>No matches</h2>
+        <p>Try another word or part of a file name.</p>
+      </div>
+    );
+  }
   return (
     <div className="empty-messages">
-      <span className="empty-ornament" aria-hidden="true">
-        os
-      </span>
-      <p className="kicker">{hasSearch ? "Nothing found" : "A clean slate"}</p>
-      <h2>{hasSearch ? "No messages match." : "Send something useful."}</h2>
+      <BrandMark size={40} className="empty-mark" />
+      <h2>Nothing here yet</h2>
       <p>
-        {hasSearch
-          ? "Try a different word or file name."
-          : "Links, notes, photos — keep the little things moving."}
+        Type a note, paste a link or drop a file below. It shows up on every
+        device you sign in to.
       </p>
     </div>
   );
@@ -85,7 +90,7 @@ export function MessageList({
           >
             {paginationStatus === "LoadingMore"
               ? "Loading earlier…"
-              : "Load earlier messages"}
+              : "Show earlier messages"}
           </button>
         ) : null}
         {isLoading && messages.length === 0 ? <LoadingMessages /> : null}
@@ -100,9 +105,9 @@ export function MessageList({
           return (
             <div key={message._id} className="message-group">
               {showDate ? (
-                <div className="date-divider">
-                  <span>{formatDate(message._creationTime)}</span>
-                </div>
+                <h3 className="date-divider">
+                  {formatDate(message._creationTime)}
+                </h3>
               ) : null}
               <MessageBubble
                 message={message}
